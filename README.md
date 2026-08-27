@@ -4,6 +4,7 @@
 [![Publish](https://github.com/nikhilvdev/logquill-python/actions/workflows/release.yml/badge.svg)](https://github.com/nikhilvdev/logquill-python/actions/workflows/release.yml)
 [![PyPI](https://img.shields.io/pypi/v/logquill.svg)](https://pypi.org/project/logquill/)
 [![GitHub tag](https://img.shields.io/github/v/tag/nikhilvdev/logquill-python)](https://github.com/nikhilvdev/logquill-python/tags)
+[![Downloads](https://static.pepy.tech/badge/logquill)](https://pepy.tech/project/logquill)
 
 A structured, leveled logging framework for Python with pluggable transports
 and a plugin pipeline. Sibling to [`logquill` on npm](https://www.npmjs.com/package/logquill)
