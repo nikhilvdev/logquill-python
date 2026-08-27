@@ -1,0 +1,32 @@
+# ── Secrets & local env — never commit ──────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+**/secrets/
+
+# ── Python ───────────────────────────────────────────────────────────
+.venv/
+**/__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── Editors / OS cruft ───────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# ── Logs produced during local runs/tests ────────────────────────────
+*.log
+*.log.[0-9]
+CLAUDE.md
