@@ -12,7 +12,7 @@ Status: pre-release, under active development.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev,http]"
+pip install -e ".[dev,http,hooks]"
 pre-commit install
 
 ruff check .
