@@ -11,9 +11,9 @@ and a plugin pipeline. Sibling to [`logquill` on npm](https://www.npmjs.com/pack
 (`logquill-js`) — same log record shape, same level names, one mental model
 across a Python + Node stack.
 
-Status: pre-release, under active development. The core `Logger` and level
-filtering are implemented; transports, plugins, and async dispatch are not
-yet — see `CHANGELOG.md` for what's landed so far.
+Status: pre-release, under active development. The core `Logger`, level
+filtering, and transports are implemented; plugins and non-blocking async
+dispatch are not yet — see `CHANGELOG.md` for what's landed so far.
 
 ## Install
 
@@ -48,6 +48,43 @@ from logquill import JSONFormatter
 
 print(JSONFormatter().format(record))
 # '{"timestamp":"2026-08-27T18:04:12.345Z","level":"INFO","logger":"app","message":"user signed up","meta":{"user_id":42,"plan":"pro"}}'
+```
+
+## Transports
+
+Attach transports to a `Logger` to actually write records somewhere. Each
+record is dispatched to every attached transport synchronously (non-blocking
+dispatch lands in a later phase):
+
+```python
+from logquill import ConsoleTransport, FileTransport, HTTPTransport, Logger
+
+logger = Logger(
+    "app",
+    transports=[
+        ConsoleTransport(),  # stdout, ERROR/FATAL to stderr, colorized
+        FileTransport("app.log", max_bytes=10 * 1024 * 1024, backup_count=5),
+        HTTPTransport("https://logs.example.com/ingest", batch_size=50),
+    ],
+)
+
+logger.info("user signed up", user_id=42, plan="pro")
+logger.close()  # flushes the file handle and any buffered HTTP batch
+```
+
+Write your own transport by subclassing `Transport` and implementing
+`write(formatted, record)`; `format(record)` and `close()` have sensible
+defaults. `CollectingTransport` is a ready-made in-memory transport, handy
+in your own tests:
+
+```python
+from logquill import CollectingTransport, Logger
+
+sink = CollectingTransport()
+logger = Logger("app.test", transports=[sink])
+
+logger.info("hello")
+assert sink.records[0]["message"] == "hello"
 ```
 
 ## Development
