@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Added `.github/dependabot.yml`: weekly version updates for `pip`
+  dependencies and GitHub Actions.
 - Added GitHub issue templates: `.github/ISSUE_TEMPLATE/bug_report.yml`,
   `feature_request.yml`, and a `config.yml` that points security reports at
   private vulnerability reporting instead of a public issue.
