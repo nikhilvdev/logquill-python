@@ -112,5 +112,6 @@ mypy logquill
 pytest
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the PR workflow, and the
-[Code of Conduct](CODE_OF_CONDUCT.md) for community standards.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the PR workflow, the
+[Code of Conduct](CODE_OF_CONDUCT.md) for community standards, and
+[SECURITY.md](.github/SECURITY.md) for how to report a vulnerability.

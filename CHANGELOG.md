@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Added GitHub issue templates: `.github/ISSUE_TEMPLATE/bug_report.yml`,
+  `feature_request.yml`, and a `config.yml` that points security reports at
+  private vulnerability reporting instead of a public issue.
+- Added `.github/SECURITY.md`: supported-versions policy and instructions
+  to report vulnerabilities via GitHub's private vulnerability reporting
+  instead of public issues. Linked from the README.
 - Phase 2 transports: `Transport` base (`format`/`write`/`close`), `ConsoleTransport`
   (colorized, ERROR/FATAL to stderr), `FileTransport` (size-based rotation), and
   `HTTPTransport` (batched, newline-delimited JSON over stdlib `urllib`, with an
