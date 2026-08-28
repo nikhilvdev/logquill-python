@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Added GitHub issue templates: `.github/ISSUE_TEMPLATE/bug_report.yml`,
+  `feature_request.yml`, and a `config.yml` that points security reports at
+  private vulnerability reporting instead of a public issue.
+- Added `.github/SECURITY.md`: supported-versions policy and instructions
+  to report vulnerabilities via GitHub's private vulnerability reporting
+  instead of public issues. Linked from the README.
+- Phase 2 transports: `Transport` base (`format`/`write`/`close`), `ConsoleTransport`
+  (colorized, ERROR/FATAL to stderr), `FileTransport` (size-based rotation), and
+  `HTTPTransport` (batched, newline-delimited JSON over stdlib `urllib`, with an
+  injectable `sender` for tests or alternate backends). `Logger` now accepts
+  `transports=[...]` and dispatches each record to them synchronously, and gained
+  `.close()` to close all attached transports. Dispatch is still synchronous —
+  the non-blocking queue/async path is Phase 4. Also added `CollectingTransport`,
+  an in-memory transport for tests.
 - Added `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1), `.github/CODEOWNERS`,
   `.github/PULL_REQUEST_TEMPLATE.md`, and `CONTRIBUTING.md` documenting the
   PR workflow (branch naming, scoping, review/CI requirements, squash-merge).
