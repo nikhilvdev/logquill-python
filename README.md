@@ -3,17 +3,29 @@
 [![CI](https://github.com/nikhilvdev/logquill-python/actions/workflows/ci.yml/badge.svg)](https://github.com/nikhilvdev/logquill-python/actions/workflows/ci.yml)
 [![Publish](https://github.com/nikhilvdev/logquill-python/actions/workflows/release.yml/badge.svg)](https://github.com/nikhilvdev/logquill-python/actions/workflows/release.yml)
 [![PyPI](https://img.shields.io/pypi/v/logquill.svg)](https://pypi.org/project/logquill/)
+[![Python versions](https://img.shields.io/badge/python-3.8%2B-blue.svg)](pyproject.toml)
+[![License](https://img.shields.io/github/license/nikhilvdev/logquill-python)](LICENSE)
 [![GitHub tag](https://img.shields.io/github/v/tag/nikhilvdev/logquill-python)](https://github.com/nikhilvdev/logquill-python/tags)
 [![Downloads](https://static.pepy.tech/badge/logquill)](https://pepy.tech/project/logquill)
 
-A structured, leveled logging framework for Python with pluggable transports
-and a plugin pipeline. Sibling to [`logquill` on npm](https://www.npmjs.com/package/logquill)
+A structured, leveled logging framework for Python with pluggable transports.
+Sibling to [`logquill` on npm](https://www.npmjs.com/package/logquill)
 (`logquill-js`) — same log record shape, same level names, one mental model
 across a Python + Node stack.
 
 Status: pre-release, under active development. The core `Logger`, level
 filtering, and transports are implemented; plugins and non-blocking async
 dispatch are not yet — see `CHANGELOG.md` for what's landed so far.
+
+## Features
+
+- **Structured by default** — every call carries a `meta` dict, not just a message string
+- **Cross-language record shape** — identical JSON shape and level names/weights as [`logquill` on npm](https://www.npmjs.com/package/logquill)
+- **Pluggable transports** — `ConsoleTransport` (colorized, stderr for errors), `FileTransport` (rotation), `HTTPTransport` (batched); write your own by subclassing `Transport`
+- **Pluggable formatters** — `JSONFormatter` out of the box; implement `format(record) -> str` for your own
+- **Zero required runtime dependencies** — stdlib only; `aiohttp` is opt-in, for async HTTP
+- **Typed throughout** — `mypy --strict` clean on the public API
+- *(planned)* plugin pipeline (redaction, sampling, rate limiting), non-blocking async dispatch, `contextvars`-based context propagation — see `CHANGELOG.md`
 
 ## Install
 
