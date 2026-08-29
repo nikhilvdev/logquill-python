@@ -14,8 +14,9 @@ Sibling to [`logquill` on npm](https://www.npmjs.com/package/logquill)
 across a Python + Node stack.
 
 Status: pre-release, under active development. The core `Logger`, level
-filtering, and transports are implemented; plugins and non-blocking async
-dispatch are not yet — see `CHANGELOG.md` for what's landed so far.
+filtering, transports, and the plugin pipeline are implemented;
+non-blocking async dispatch is not yet — see `CHANGELOG.md` for what's
+landed so far.
 
 ## Features
 
@@ -23,9 +24,10 @@ dispatch are not yet — see `CHANGELOG.md` for what's landed so far.
 - **Cross-language record shape** — identical JSON shape and level names/weights as [`logquill` on npm](https://www.npmjs.com/package/logquill)
 - **Pluggable transports** — `ConsoleTransport` (colorized, stderr for errors), `FileTransport` (rotation), `HTTPTransport` (batched); write your own by subclassing `Transport`
 - **Pluggable formatters** — `JSONFormatter` out of the box; implement `format(record) -> str` for your own
+- **Plugin pipeline** — `ContextPlugin`, `RedactPlugin`, `SamplingPlugin` out of the box; a broken plugin can't crash logging
 - **Zero required runtime dependencies** — stdlib only; `aiohttp` is opt-in, for async HTTP
 - **Typed throughout** — `mypy --strict` clean on the public API
-- *(planned)* plugin pipeline (redaction, sampling, rate limiting), non-blocking async dispatch, `contextvars`-based context propagation — see `CHANGELOG.md`
+- *(planned)* non-blocking async dispatch, `contextvars`-based context propagation — see `CHANGELOG.md`
 
 ## Install
 
@@ -66,7 +68,7 @@ print(JSONFormatter().format(record))
 
 Attach transports to a `Logger` to actually write records somewhere. Each
 record is dispatched to every attached transport synchronously (non-blocking
-dispatch lands in a later phase):
+dispatch isn't implemented yet):
 
 ```python
 from logquill import ConsoleTransport, FileTransport, HTTPTransport, Logger
@@ -98,6 +100,28 @@ logger = Logger("app.test", transports=[sink])
 logger.info("hello")
 assert sink.records[0]["message"] == "hello"
 ```
+
+## Plugins
+
+Plugins hook into the pipeline around each log call: `before_log(record)` can
+transform a record or return `None` to drop it, `after_log(record)` runs once
+it's been dispatched to every transport, and `on_error(exc, record)` catches
+anything a plugin's own hooks raise — a broken plugin can't take down logging.
+
+```python
+from logquill import ContextPlugin, Logger, RedactPlugin, SamplingPlugin
+
+logger = Logger("app")
+logger.use(ContextPlugin(service="api", env="prod"))  # merged into every record's meta
+logger.use(RedactPlugin(keys=["password", "token"]))  # replaces matching meta values
+logger.use(SamplingPlugin(0.1))  # keep ~10% of records that reach this point
+
+logger.info("login attempt", user_id=42, password="hunter2")
+# meta: {'service': 'api', 'env': 'prod', 'user_id': 42, 'password': '***'}
+# (unless this call was one of the ~90% sampling dropped, in which case it's None)
+```
+
+Write your own by subclassing `Plugin`; override only the hooks you need.
 
 ## Development
 

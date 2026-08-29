@@ -21,9 +21,8 @@ pytest
 
 - **Branch from `main`**, name branches by intent: `feat/…`, `fix/…`,
   `docs/…`, `chore/…` (e.g. `feat/rotating-file-transport`).
-- **Keep PRs scoped to one phase or concern** where possible. A PR that
-  mixes an unrelated refactor with a feature is harder to review and harder
-  to revert.
+- **Keep PRs scoped to one concern** where possible. A PR that mixes an
+  unrelated refactor with a feature is harder to review and harder to revert.
 - **Every PR must satisfy this definition of done** before it's ready for
   review:
   1. Type hints throughout, `mypy --strict` clean on the public API
