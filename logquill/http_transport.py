@@ -27,7 +27,7 @@ class HTTPTransport(Transport):
 
     Uses `urllib` (stdlib) by default so the core package stays dependency-free.
     Pass `sender` to swap in a fake for tests, or a different backend (e.g. an
-    aiohttp-based one, once the async dispatch path from Phase 4 exists).
+    aiohttp-based one, once a non-blocking async dispatch path exists).
     """
 
     def __init__(

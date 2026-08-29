@@ -15,5 +15,5 @@
 
 ## Scope
 
-<!-- One phase/concern per PR where possible. Call out here if this
+<!-- One concern per PR where possible. Call out here if this
      intentionally spans more than one. -->
