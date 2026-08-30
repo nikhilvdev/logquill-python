@@ -4,9 +4,9 @@ import contextlib
 from typing import Any
 
 from logquill.levels import Level, parse_level
-from logquill.plugin import Plugin
+from logquill.plugins.plugin import Plugin
 from logquill.records import LogRecord, create_record
-from logquill.transport import Transport
+from logquill.transports.transport import Transport
 
 
 class Logger:
