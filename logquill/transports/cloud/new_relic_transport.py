@@ -7,7 +7,7 @@ import time
 import urllib.error
 import urllib.request
 from email.utils import parsedate_to_datetime
-from typing import Callable, Literal, Sequence, TypedDict
+from typing import Callable, Dict, Literal, Sequence, TypedDict
 
 from logquill.formatter import Formatter
 from logquill.records import LogRecord
@@ -29,7 +29,7 @@ class NewRelicSenderResult(TypedDict):
     retry_after: str | None
 
 
-NewRelicSender = Callable[[str, dict[str, str], bytes], NewRelicSenderResult]
+NewRelicSender = Callable[[str, Dict[str, str], bytes], NewRelicSenderResult]
 
 
 def _urllib_sender(url: str, headers: dict[str, str], body: bytes) -> NewRelicSenderResult:
