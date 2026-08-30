@@ -4,6 +4,46 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- New transports: SQL (`BaseSQLTransport` + `SQLiteTransport`,
+  `PostgresTransport`, `MySQLTransport`), NoSQL (`MongoDBTransport`,
+  `DynamoDBTransport`, `RedisTransport`), message queues
+  (`BaseQueueTransport` + `KafkaTransport`, `RabbitMQTransport`,
+  `SQSTransport`, `PubSubTransport`), and cloud-native sinks
+  (`CloudWatchTransport`, `CloudLoggingTransport`, `AppInsightsTransport`,
+  `DatadogTransport`, `ElasticsearchTransport`, `NewRelicTransport`) —
+  full parity with `logquill-js` 0.2.0. All of it sits on a new shared
+  `BatchingTransport` base that bounds its buffer by both record count and
+  estimated byte size, swaps the buffer out before sending so a
+  synchronous re-entrant flush can't double-send, and catches a failing
+  send rather than propagating it to the caller (logged via Python's
+  stdlib `logging.getLogger("logquill")`) — a slow or down sink can't
+  crash the process. Every optional backend driver (`psycopg2-binary`,
+  `pymysql`, `pymongo`, `boto3`, `redis`, `kafka-python`, `pika`,
+  `google-cloud-pubsub`, `google-cloud-logging`) is a lazy, injectable
+  dependency behind a new `pyproject.toml` extra (`postgres`, `mysql`,
+  `mongodb`, `redis`, `kafka`, `rabbitmq`, `pubsub`, `gcp-logging`, and a
+  shared `aws` extra for CloudWatch/DynamoDB/SQS, all boto3-backed); a
+  missing driver raises an actionable `ImportError` rather than a
+  cryptic one, and every test injects a hand-written fake instead of
+  requiring a live service. `SQLiteTransport` needs no extra at all
+  (stdlib `sqlite3`).
+
+  Two deliberate departures from `logquill-js`'s implementation, same
+  outward behavior: `AppInsightsTransport` posts to Application Insights'
+  public ingestion endpoint via stdlib `urllib` instead of an Azure SDK
+  dependency, and `SQSTransport` dispatches its 10-message chunks
+  sequentially rather than concurrently, since this project's dispatch is
+  still fully synchronous end to end (true concurrency arrives once a
+  non-blocking async worker exists). `SyslogTransport` isn't included
+  here either, matching `logquill-js` 0.2.0, which didn't ship it; it's a
+  shared follow-up for both packages, not a Python-only gap.
+
+  Also restructured `logquill/transport.py`, `console_transport.py`,
+  `file_transport.py`, and `http_transport.py` into a new
+  `logquill/transports/` subpackage (with `sql/`, `nosql/`, `queue/`, and
+  `cloud/` subpackages) to hold the 17 new transports — a pure move, the
+  public `from logquill import ...` surface is unchanged.
+
 - Plugin pipeline: `Plugin` base (`before_log`/`after_log`/`on_error`,
   all optional to override), `ContextPlugin` (merges fixed context into
   `meta`), `RedactPlugin` (replaces sensitive `meta` values by key, case-
