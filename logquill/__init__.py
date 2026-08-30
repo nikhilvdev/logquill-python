@@ -30,7 +30,7 @@ from logquill.transports.sql.postgres_transport import PostgresTransport
 from logquill.transports.sql.sqlite_transport import SQLiteTransport
 from logquill.transports.transport import CollectingTransport, Transport
 
-__version__ = "0.1.3"
+__version__ = "0.2.1"
 
 __all__ = [
     "AppInsightsTransport",
