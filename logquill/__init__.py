@@ -1,10 +1,16 @@
 from logquill.formatter import Formatter, JSONFormatter
 from logquill.levels import Level, parse_level
 from logquill.logger import Logger
+from logquill.plugins.alerting_plugin import AlertingPlugin
 from logquill.plugins.context_plugin import ContextPlugin
-from logquill.plugins.plugin import Plugin
+from logquill.plugins.email_alert_plugin import EmailAlertPlugin
+from logquill.plugins.pagerduty_alert_plugin import PagerDutyAlertPlugin
+from logquill.plugins.pii_redact_plugin import PIIRedactPlugin
+from logquill.plugins.plugin import FunctionPlugin, Plugin
 from logquill.plugins.redact_plugin import RedactPlugin
 from logquill.plugins.sampling_plugin import SamplingPlugin
+from logquill.plugins.slack_alert_plugin import SlackAlertPlugin
+from logquill.plugins.tamper_evident_plugin import TamperEvidentPlugin
 from logquill.records import LogRecord
 from logquill.transports.batching_transport import BatchingTransport
 from logquill.transports.cloud.app_insights_transport import AppInsightsTransport
@@ -30,9 +36,10 @@ from logquill.transports.sql.postgres_transport import PostgresTransport
 from logquill.transports.sql.sqlite_transport import SQLiteTransport
 from logquill.transports.transport import CollectingTransport, Transport
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 __all__ = [
+    "AlertingPlugin",
     "AppInsightsTransport",
     "BaseQueueTransport",
     "BaseSQLTransport",
@@ -45,8 +52,10 @@ __all__ = [
     "DatadogTransport",
     "DynamoDBTransport",
     "ElasticsearchTransport",
+    "EmailAlertPlugin",
     "FileTransport",
     "Formatter",
+    "FunctionPlugin",
     "HTTPTransport",
     "JSONFormatter",
     "KafkaTransport",
@@ -56,6 +65,8 @@ __all__ = [
     "MongoDBTransport",
     "MySQLTransport",
     "NewRelicTransport",
+    "PIIRedactPlugin",
+    "PagerDutyAlertPlugin",
     "Plugin",
     "PostgresTransport",
     "PubSubTransport",
@@ -66,6 +77,8 @@ __all__ = [
     "SQLiteTransport",
     "SQSTransport",
     "SamplingPlugin",
+    "SlackAlertPlugin",
+    "TamperEvidentPlugin",
     "Transport",
     "parse_level",
     "__version__",

@@ -24,7 +24,7 @@ landed so far.
 - **Cross-language record shape** — identical JSON shape and level names/weights as [`logquill` on npm](https://www.npmjs.com/package/logquill)
 - **Pluggable transports** — `ConsoleTransport` (colorized, stderr for errors), `FileTransport` (rotation), `HTTPTransport` (batched), plus SQL/NoSQL/message-queue/cloud-native sinks (see [Transports](#transports)); write your own by subclassing `Transport`
 - **Pluggable formatters** — `JSONFormatter` out of the box; implement `format(record) -> str` for your own
-- **Plugin pipeline** — `ContextPlugin`, `RedactPlugin`, `SamplingPlugin` out of the box; a broken plugin can't crash logging
+- **Plugin pipeline** — `ContextPlugin`, `RedactPlugin` (by key), `PIIRedactPlugin` (by pattern), `SamplingPlugin` (with tail-based elevation), `TamperEvidentPlugin` (hash-chained logs), and `AlertingPlugin` (`SlackAlertPlugin`/`PagerDutyAlertPlugin`/`EmailAlertPlugin`, deduplicated) out of the box; a broken plugin can't crash logging; `.use()` also accepts a plain function, no subclassing required (see [Plugins](#plugins))
 - **Zero required runtime dependencies** — stdlib only; `aiohttp` is opt-in, for async HTTP
 - **Typed throughout** — `mypy --strict` clean on the public API
 - *(planned)* non-blocking async dispatch, `contextvars`-based context propagation — see `CHANGELOG.md`
@@ -253,6 +253,9 @@ Plugins hook into the pipeline around each log call: `before_log(record)` can
 transform a record or return `None` to drop it, `after_log(record)` runs once
 it's been dispatched to every transport, and `on_error(exc, record)` catches
 anything a plugin's own hooks raise — a broken plugin can't take down logging.
+Records are **not** deep-copied through the pipeline — a plugin receives and
+may mutate the same dict every other plugin sees; copy it yourself in
+`before_log` if you need to preserve the original.
 
 ```python
 from logquill import ContextPlugin, Logger, RedactPlugin, SamplingPlugin
@@ -267,7 +270,125 @@ logger.info("login attempt", user_id=42, password="hunter2")
 # (unless this call was one of the ~90% sampling dropped, in which case it's None)
 ```
 
-Write your own by subclassing `Plugin`; override only the hooks you need.
+Write your own by subclassing `Plugin`; override only the hooks you need. For
+a one-off transform, skip the subclass entirely — `.use()` also accepts a
+plain function, wrapped internally as an anonymous `Plugin`:
+
+```python
+from logquill import Logger
+
+def strip_ssn(record):
+    record["meta"].pop("ssn", None)
+    return record  # or None to drop the record
+
+logger = Logger("app")
+logger.use(strip_ssn)
+logger.info("submit", ssn="123-45-6789", user_id=42)
+# meta: {'user_id': 42}
+```
+
+### Tail-based sampling elevation
+
+Plain `SamplingPlugin(rate)` drops records independently of each other. Add
+`transports=` and every record's `meta["trace_id"]` (configurable via
+`trace_key`) turns sampling tail-based instead: a dropped record is buffered
+under its trace id rather than discarded, and if any later record in that
+same trace reaches `elevate_at` (default `ERROR`), the whole trace — every
+buffered record plus everything from then on — ships, flushed straight to
+`transports`. A request that looked unremarkable when it started still
+produces a complete trace once it turns out to have failed.
+
+```python
+from logquill import CollectingTransport, Logger, SamplingPlugin
+
+sink = CollectingTransport()
+sampling = SamplingPlugin(0.01, transports=[sink])  # keep ~1%, tail-elevate the rest
+logger = Logger("app", transports=[sink], plugins=[sampling])
+
+logger.info("received request", trace_id="req-42")   # likely dropped — held in the buffer
+logger.info("queried database", trace_id="req-42")    # likely dropped — held in the buffer
+logger.error("query timed out", trace_id="req-42")     # elevates the whole trace
+
+assert [r["message"] for r in sink.records] == [
+    "received request",
+    "queried database",
+    "query timed out",
+]
+```
+
+Buffering is bounded by `max_buffered_records` and `max_traces` — the oldest
+buffered trace is evicted once either limit is hit, so a single
+high-cardinality or long-lived trace can't grow memory without limit.
+
+### PII redaction by pattern, not just key
+
+`RedactPlugin` redacts by exact key match. `PIIRedactPlugin` complements it by
+scanning `meta` **values** — recursively through nested dicts/lists/tuples —
+for emails, SSNs, credit-card numbers, and phone numbers, and redacts matches
+wherever they appear, regardless of which key holds them:
+
+```python
+from logquill import Logger, PIIRedactPlugin
+
+logger = Logger("app", plugins=[PIIRedactPlugin()])
+
+logger.info("support ticket", notes="reach me at jane@example.com, ssn 123-45-6789")
+# meta: {'notes': 'reach me at ***, ssn ***'}
+```
+
+Detection is regex-based by default — fast, dependency-free, matched on shape
+rather than meaning. For fuzzier ML-based detection instead, pass
+`use_presidio=True` (`pip install logquill[presidio]`) to route values
+through Microsoft Presidio's analyzer/anonymizer; Presidio stays a real,
+opt-in dependency, never a default one.
+
+### Tamper-evident logs
+
+`TamperEvidentPlugin` hash-chains every record — each one's `meta.hash` covers
+its own content plus the previous record's hash — so editing, removing, or
+reordering a line in a written log breaks the chain from that point on.
+Opt-in, since hashing every record has a real CPU cost:
+
+```python
+from logquill import Logger, TamperEvidentPlugin
+
+logger = Logger("app", plugins=[TamperEvidentPlugin()])
+records = [logger.info(f"step {i}") for i in range(3)]
+
+assert TamperEvidentPlugin.verify_chain(records) is True
+
+records[1]["message"] = "tampered"  # simulate an edited log line
+assert TamperEvidentPlugin.verify_chain(records) is False
+```
+
+### Alerting on errors
+
+`AlertingPlugin` is a base class for firing an external alert on ERROR/FATAL
+(or any configurable `threshold`). It never blocks the log call that
+triggered it — the actual send runs on a background thread — and repeated
+identical errors within `dedupe_window_seconds` collapse into a single
+follow-up alert carrying an occurrence count, instead of spamming the
+destination once per record. Concrete subclasses ship for Slack, PagerDuty,
+and email:
+
+```python
+from logquill import Logger, PagerDutyAlertPlugin, SlackAlertPlugin
+
+logger = Logger(
+    "app",
+    plugins=[
+        SlackAlertPlugin("https://hooks.slack.com/services/T000/B000/xxx"),
+        PagerDutyAlertPlugin("your-events-api-v2-routing-key", threshold="FATAL"),
+    ],
+)
+
+logger.error("payment webhook failed")  # posts to the Slack webhook
+logger.fatal("database unreachable")  # also pages via PagerDuty (threshold=FATAL)
+```
+
+Write your own destination by subclassing `AlertingPlugin` and implementing
+`send_alert(record, occurrences)`; thresholding, deduplication, and the
+never-block-the-caller behavior are all handled by the base class.
 
 ## Development
 

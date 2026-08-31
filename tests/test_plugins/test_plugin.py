@@ -105,3 +105,60 @@ def test_use_registers_a_plugin_and_returns_self_for_chaining() -> None:
     assert result is logger
     logger.info("hi")
     assert sink.records[0]["message"] == "HI"
+
+
+def test_use_accepts_a_plain_function_as_middleware() -> None:
+    def strip_ssn(record: LogRecord) -> LogRecord | None:
+        record["meta"].pop("ssn", None)
+        return record
+
+    sink = CollectingTransport()
+    logger = Logger("app.test", transports=[sink])
+
+    logger.use(strip_ssn)
+    record = logger.info("submit", ssn="123-45-6789", user_id=42)
+
+    assert record is not None
+    assert "ssn" not in record["meta"]
+    assert record["meta"]["user_id"] == 42
+
+
+def test_function_middleware_behaves_identically_to_an_equivalent_plugin() -> None:
+    def uppercase(record: LogRecord) -> LogRecord | None:
+        record["message"] = record["message"].upper()
+        return record
+
+    function_sink = CollectingTransport()
+    function_logger = Logger("app.test", transports=[function_sink])
+    function_logger.use(uppercase)
+
+    plugin_sink = CollectingTransport()
+    plugin_logger = Logger("app.test", transports=[plugin_sink], plugins=[UppercasePlugin()])
+
+    function_logger.info("hello")
+    plugin_logger.info("hello")
+
+    assert function_sink.records[0]["message"] == plugin_sink.records[0]["message"] == "HELLO"
+
+
+def test_use_accepting_a_function_returning_none_drops_the_record() -> None:
+    def drop_everything(record: LogRecord) -> LogRecord | None:
+        return None
+
+    logger = Logger("app.test")
+    logger.use(drop_everything)
+
+    assert logger.info("hello") is None
+
+
+def test_constructor_plugins_list_accepts_functions_too() -> None:
+    def strip_ssn(record: LogRecord) -> LogRecord | None:
+        record["meta"].pop("ssn", None)
+        return record
+
+    logger = Logger("app.test", plugins=[strip_ssn])
+
+    record = logger.info("submit", ssn="123-45-6789")
+
+    assert record is not None
+    assert "ssn" not in record["meta"]

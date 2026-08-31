@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 from typing import Any
 
 from logquill.levels import Level, parse_level
-from logquill.plugins.plugin import Plugin
+from logquill.plugins.plugin import FunctionPlugin, MiddlewareFunc, Plugin
 from logquill.records import LogRecord, create_record
 from logquill.transports.transport import Transport
+
+_logger = logging.getLogger("logquill")
 
 
 class Logger:
@@ -15,12 +18,14 @@ class Logger:
         name: str,
         level: int | str | Level = Level.INFO,
         transports: list[Transport] | None = None,
-        plugins: list[Plugin] | None = None,
+        plugins: list[Plugin | MiddlewareFunc] | None = None,
     ) -> None:
         self.name = name
         self._level = parse_level(level)
         self.transports: list[Transport] = list(transports) if transports else []
-        self.plugins: list[Plugin] = list(plugins) if plugins else []
+        self.plugins: list[Plugin] = []
+        for plugin in plugins or []:
+            self.use(plugin)
 
     @property
     def level(self) -> Level:
@@ -29,8 +34,16 @@ class Logger:
     def set_level(self, level: int | str | Level) -> None:
         self._level = parse_level(level)
 
-    def use(self, plugin: Plugin) -> Logger:
-        """Register a plugin. Returns `self` so calls can be chained."""
+    def use(self, plugin: Plugin | MiddlewareFunc) -> Logger:
+        """Register a plugin, or a plain `before_log`-style function.
+
+        A function is wrapped internally as an anonymous `Plugin`
+        (`FunctionPlugin`) — the same middleware ergonomics as Express/Koa,
+        without needing to read the `Plugin` base class first. Returns
+        `self` so calls can be chained.
+        """
+        if not isinstance(plugin, Plugin):
+            plugin = FunctionPlugin(plugin)
         self.plugins.append(plugin)
         return self
 
@@ -60,7 +73,12 @@ class Logger:
             record = result
 
         for transport in self.transports:
-            transport.write(transport.format(record), record)
+            try:
+                transport.write(transport.format(record), record)
+            except Exception:
+                # a transport that can't format or write this particular record
+                # (e.g. a circular reference in `meta`) must not crash the caller
+                _logger.exception("%s: failed to write a log record", type(transport).__name__)
 
         for plugin in self.plugins:
             try:
