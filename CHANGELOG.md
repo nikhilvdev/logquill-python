@@ -4,6 +4,65 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.3.0 - 2026-08-31
+
+- Plugin pipeline, Phase 4 complete: `SamplingPlugin` gained tail-based
+  elevation — with `transports=` set, a record that would be dropped is
+  buffered per `meta["trace_id"]` (configurable via `trace_key`) instead of
+  discarded outright, and if any later record in that trace reaches
+  `elevate_at` (default `ERROR`), the whole trace — every buffered record
+  plus everything after — ships, flushed straight to `transports`. Buffering
+  is bounded by `max_buffered_records` and `max_traces`, oldest trace
+  evicted first. Without `transports`, behavior is unchanged from plain
+  rate-based sampling.
+- `Logger.use()` (and the `plugins=[...]` constructor list) now accepts a
+  plain function alongside a `Plugin` instance — wrapped internally as an
+  anonymous `Plugin` (`FunctionPlugin`) — so a one-off `before_log`-style
+  transform doesn't require subclassing `Plugin` first.
+- `PIIRedactPlugin`: regex-based PII redaction over `meta` **values**
+  (emails, SSNs, credit-card numbers, phone numbers), recursing through
+  nested dicts/lists/tuples and matching regardless of which key holds the
+  value — complements `RedactPlugin`'s exact-key matching. Depth- and
+  cycle-bounded, so a circular reference or pathologically deep structure
+  can't hang or crash the caller. An opt-in `use_presidio=True` mode
+  (`pip install logquill[presidio]`) routes values through Microsoft
+  Presidio's analyzer/anonymizer instead, for ML-based detection; Presidio
+  is imported lazily and stays a real, non-default dependency.
+- `TamperEvidentPlugin`: hash-chains every record (`meta.hash` over the
+  record's own content plus the previous record's `meta.hash`, stored as
+  `meta.prev_hash`), so editing, removing, or reordering a line in a
+  written log breaks the chain from that point on. Ships with a static
+  `TamperEvidentPlugin.verify_chain(records)` to check a log after the
+  fact. Opt-in — hashing every record has a real, measurable CPU cost.
+- `AlertingPlugin` base class + `SlackAlertPlugin`, `PagerDutyAlertPlugin`,
+  and `EmailAlertPlugin`: fires on ERROR/FATAL (or any configurable
+  `threshold`), with the actual send always running on a background
+  thread so a slow or unreachable destination can never block the log call
+  that triggered it. Repeated identical errors (same level + logger +
+  message by default, or a custom `dedupe_key`) within
+  `dedupe_window_seconds` collapse into one follow-up alert carrying an
+  occurrence count instead of spamming the destination once per record.
+  `send_alert` failures are caught and routed to the plugin's own
+  `on_error`, same as any other plugin hook. Tracking is bounded to
+  `max_tracked_keys` concurrent dedupe windows — alerting degrades under
+  extreme cardinality, logging itself never does. All three concrete
+  plugins use only the stdlib (`urllib`, `smtplib`) — no new required
+  dependency.
+- Fixed a pre-existing gap surfaced by a new property-based test (see
+  below): `Logger`'s per-transport dispatch had no error handling, so a
+  transport that failed to format or write a given record (e.g.
+  `JSONFormatter` on a `meta` value containing a circular reference) would
+  propagate the exception straight to the caller. Now caught and logged via
+  the same `logging.getLogger("logquill")` channel `BatchingTransport`
+  already uses, per transport, so one broken transport can't crash the
+  caller or stop other attached transports from receiving the record.
+- Added a `hypothesis`-based property test (new `dev` dependency) that
+  drives the plugin pipeline (`ContextPlugin`, `RedactPlugin`,
+  `PIIRedactPlugin`, `TamperEvidentPlugin`) with adversarial `meta` —
+  deeply nested structures, unusual scalar types, non-JSON-serializable
+  values, and circular references — asserting the pipeline never crashes
+  the caller, only ever fails closed.
+
 - New transports: SQL (`BaseSQLTransport` + `SQLiteTransport`,
   `PostgresTransport`, `MySQLTransport`), NoSQL (`MongoDBTransport`,
   `DynamoDBTransport`, `RedisTransport`), message queues

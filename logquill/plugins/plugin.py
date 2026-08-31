@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from typing import Callable
+
 from logquill.records import LogRecord
+
+MiddlewareFunc = Callable[[LogRecord], "LogRecord | None"]
 
 
 class Plugin:
@@ -20,3 +24,20 @@ class Plugin:
 
     def on_error(self, exc: Exception, record: LogRecord) -> None:
         """Called when one of this plugin's own hooks raises."""
+
+
+class FunctionPlugin(Plugin):
+    """Wraps a plain `before_log`-style function as a `Plugin`.
+
+    `Logger.use()` builds one of these automatically when given a function
+    instead of a `Plugin` subclass — a one-off transform shouldn't require
+    subclassing ceremony. There's no `next()` chaining: the pipeline is
+    already an ordered list of hooks the `Logger` calls in sequence, so this
+    is sugar for a single-method `Plugin`, not a new execution model.
+    """
+
+    def __init__(self, func: MiddlewareFunc) -> None:
+        self._func = func
+
+    def before_log(self, record: LogRecord) -> LogRecord | None:
+        return self._func(record)
