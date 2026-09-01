@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "logquill"
-version = "0.3.0"
+version = "0.4.0"
 description = "A structured, leveled logging framework with pluggable transports and a plugin pipeline."
 readme = "README.md"
 license = "MIT"
@@ -49,6 +49,12 @@ pubsub = ["google-cloud-pubsub>=2.21"]
 gcp-logging = ["google-cloud-logging>=3.10"]
 aws = ["boto3>=1.34"]
 presidio = ["presidio-analyzer>=2.2", "presidio-anonymizer>=2.2"]
+crypto = ["cryptography>=41"]
+langchain = ["langchain-core>=0.3"]
+crewai = ["crewai>=1.0"]
+llamaindex = ["llama-index-core>=0.12"]
+autogen = ["autogen-core>=0.6"]
+yaml = ["PyYAML>=6.0"]
 dev = [
     "ruff>=0.6",
     "mypy>=1.11",
@@ -85,6 +91,18 @@ select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
 strict = true
 python_version = "3.10"
 files = ["logquill"]
+
+# `cryptography` (optional, lazily imported for `FileTransport(encrypt_key=...)`)
+# is never a direct dev dependency, but `twine` -> `keyring` -> `SecretStorage`
+# pulls it in transitively on Linux only (`SecretStorage` is a Linux-only
+# keyring backend) — so CI (ubuntu-latest) sees it as genuinely importable and
+# flags the `# type: ignore[import-not-found]` as unused, while it's genuinely
+# absent (and the ignore genuinely needed) on macOS/Windows. The import's
+# resolvability is platform-dependent through no fault of this module, so
+# `warn_unused_ignores` is disabled here specifically rather than project-wide.
+[[tool.mypy.overrides]]
+module = "logquill.transports.file_transport"
+warn_unused_ignores = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

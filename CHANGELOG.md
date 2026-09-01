@@ -4,6 +4,116 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.4.0 - 2026-09-01
+
+- Closed three gaps found auditing Phases 1–3 against their own written
+  exit criteria (each had been marked "shipped" despite this):
+  - Phase 1: config loading from file/env. `load_config(dict)`,
+    `logger_from_file(path)` (JSON built in; YAML via the optional
+    `pip install logquill[yaml]`), and `logger_from_env(prefix=
+    "LOGQUILL_")` build a `Logger` from `{"name", "level", "transports":
+    [{"type"|"class", "options"}], "plugins": [...]}`. A small built-in
+    `"type"` registry covers the zero-dependency transports/plugins;
+    anything else (every cloud/SQL/NoSQL/queue transport, the alerting
+    plugins, framework adapters, your own subclass) goes through `"class"`
+    — a fully-qualified dotted path, resolved the same way `logging.
+    config.dictConfig` resolves one. `{prefix}LEVEL` in the environment
+    always overrides a config file's level.
+  - Phase 2: `FileTransport(encrypt_key=...)` encrypts each line with
+    `cryptography.fernet.Fernet` before writing — worth doing here
+    specifically because cloud transports typically already encrypt
+    server-side, but a local log file on disk usually doesn't. Optional
+    `pip install logquill[crypto]`, imported lazily.
+  - Phase 3: `SyslogTransport` — RFC 5424 messages over UDP (default) or
+    TCP, stdlib `socket` only, no dependency. Not a batching transport,
+    unlike the HTTP-API cloud transports: syslog is one-datagram/one-
+    message-per-call.
+- Fixed a pre-existing crash the plugin-pipeline hypothesis property test
+  caught during this audit, unrelated to the three gaps above: any of
+  `Logger`'s message-taking methods (`.info()`, `.error()`, `.action()`,
+  ...) raised `TypeError: got multiple values for argument 'message'` if
+  the caller's `**meta` happened to contain a key literally named
+  `"message"` (and `.child()`/`.span()` had the same issue with `"name"`)
+  — exactly the kind of caller-crashing bug those hypothesis tests exist
+  to catch. `message`/`name` are now positional-only on every affected
+  method, so a `meta`/`fixed_meta` key with that exact name now flows
+  through as ordinary meta instead of colliding.
+- Phase 5, trace correlation & agentic tracing, complete:
+  - `Logger.child(name, **fixed_meta)` — a namespaced logger sharing the
+    parent's transports, with its own plugin pipeline and optional fixed
+    context injected into every record.
+  - `.thought()/.action()/.observation()/.decision()` — `.info()` with
+    `meta.kind` pre-set, for tagging agent reasoning steps.
+  - `Logger.span(name)`, used as `with agent_log.span("call_llm"):` —
+    emits one record on exit carrying `meta.span_id`/`meta.duration_ms`;
+    every record logged inside the block (through any method) is
+    automatically stamped with `meta.parent_span_id`, so a full run
+    reconstructs its exact nesting by sorting on `span_id`/`parent_span_id`.
+    Still emits its record, at `ERROR` with `meta.error` set, if the block
+    raises — the exception itself propagates unchanged.
+  - `RunPlugin` — stamps `meta.run_id` (generated if not given) and an
+    incrementing `meta.step`; one instance scopes one run, so concurrent
+    runs never share a counter.
+  - `TraceContextPlugin` — stamps `meta.trace_id` for cross-service
+    correlation, distinct from `run_id`. Resolves an active OpenTelemetry
+    span's trace id first (best-effort, lazy import), then a W3C
+    `traceparent`/AWS X-Ray/GCP trace header propagated via the new
+    `set_traceparent()`/`reset_traceparent()` (a `contextvars`-based
+    per-thread/asyncio-task mechanism), and generates a fresh id only if
+    neither is available.
+  - `LogQuillAdapter` base class + `LangChainAdapter`
+    (`pip install logquill[langchain]`) — maps LangChain's
+    `BaseCallbackHandler` events onto the calls above; covers LangGraph
+    for free, since it shares LangChain's callback system. LangChain's own
+    `run_id`/`parent_run_id` are written directly onto
+    `meta.span_id`/`meta.parent_span_id`. `langchain-core` is never
+    imported unless `logquill.adapters.langchain` is imported explicitly.
+- `CrewAIAdapter` (`pip install logquill[crewai]`) — a second
+  `LogQuillAdapter` implementation, ahead of the phase schedule (CrewAI was
+  listed as a Phase 5 follow-on, not required for that phase). Listens on
+  CrewAI's own event bus (`BaseEventListener`) rather than a single
+  callback handler; a crew kickoff and each task open/close a `.span()`,
+  while agent execution, tool usage, and LLM calls become `.action()`/
+  `.observation()`/`.error()` pairs with `duration_ms`. Correlation reads
+  directly off CrewAI's own `event.parent_event_id`/`event.started_event_id`
+  (populated by CrewAI's own `contextvars`-backed scope stack) rather than
+  tracking anything independently — the same field-renaming approach
+  `LangChainAdapter` takes with LangChain's `run_id`/`parent_run_id`.
+  `crewai` is never imported unless `logquill.adapters.crewai` is imported
+  explicitly.
+- `LlamaIndexAdapter` (`pip install logquill[llamaindex]`) — a third
+  `LogQuillAdapter` implementation. LlamaIndex's own instrumentation module
+  splits into two cooperating registrations on a shared dispatcher, so this
+  adapter holds one of each rather than being a handler itself: a span
+  handler for LlamaIndex's own method-level calls (`query()`, `chat()`,
+  `retrieve()`, ...), each becoming a `span_id`/`duration_ms` record with
+  `parent_span_id` set for a nested call; and an event handler for named
+  events fired *within* those calls, classified generically by class-name
+  suffix (`*StartEvent` -> `.action()`, `*EndEvent` -> `.observation()`,
+  `*ErrorEvent` -> `.error()`) rather than enumerated one by one, so a new
+  LlamaIndex event type needs no adapter change to show up correctly.
+  `llama-index-core` is never imported unless `logquill.adapters.llamaindex`
+  is imported explicitly.
+- `AutoGenAdapter` (`pip install logquill[autogen]`) — a fourth
+  `LogQuillAdapter` implementation, rounding out every framework CLAUDE.md
+  names as a Phase 5 follow-on. Architecturally different from the other
+  three: (Microsoft) AutoGen's actual integration point is a stdlib
+  `logging.Handler` attached to `autogen_core.EVENT_LOGGER_NAME`, where
+  model clients and tools log structured event objects (not strings), so
+  the adapter is a `Handler` whose `emit()` unpacks that object rather than
+  a callback/event-bus registration. Each event becomes a flat
+  `.action()`/`.observation()`/`.error()` record; unlike the other three
+  adapters, AutoGen's structured events carry no call-level
+  `span_id`/`parent_span_id`-equivalent (only `agent_id`), so there's no
+  span tree to reconstruct here — documented as a real limitation, not
+  glossed over. Covers `autogen-core`/`autogen-agentchat` only — **not
+  AG2**, which forked from AutoGen and, as of its 2026 rewrite, moved onto
+  its own event-driven architecture sharing none of this (confirmed against
+  its source: zero references to `EVENT_LOGGER_NAME`); unlike LangGraph
+  sharing LangChain's callback system, this is a genuine divergence and AG2
+  would need its own adapter. `autogen-core` is never imported unless
+  `logquill.adapters.autogen` is imported explicitly.
+
 ## 0.3.0 - 2026-08-31
 
 - Plugin pipeline, Phase 4 complete: `SamplingPlugin` gained tail-based

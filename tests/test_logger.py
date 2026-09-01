@@ -46,3 +46,17 @@ def test_all_level_methods_produce_matching_level_name() -> None:
     assert warn is not None and warn["level"] == "WARN"
     assert error is not None and error["level"] == "ERROR"
     assert fatal is not None and fatal["level"] == "FATAL"
+
+
+def test_a_meta_key_named_message_does_not_collide_with_the_positional_arg() -> None:
+    # `message` is positional-only specifically so this can't raise
+    # `TypeError: got multiple values for argument 'message'` — meta is
+    # caller-supplied and adversarial input is exactly what it shouldn't
+    # be able to crash on.
+    logger = Logger("app.test")
+
+    record = logger.info("hello", message="not the real message")
+
+    assert record is not None
+    assert record["message"] == "hello"
+    assert record["meta"] == {"message": "not the real message"}
