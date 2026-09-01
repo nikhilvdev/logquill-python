@@ -1,3 +1,5 @@
+from logquill.adapters.base import LogQuillAdapter
+from logquill.config import load_config, logger_from_env, logger_from_file
 from logquill.formatter import Formatter, JSONFormatter
 from logquill.levels import Level, parse_level
 from logquill.logger import Logger
@@ -8,9 +10,11 @@ from logquill.plugins.pagerduty_alert_plugin import PagerDutyAlertPlugin
 from logquill.plugins.pii_redact_plugin import PIIRedactPlugin
 from logquill.plugins.plugin import FunctionPlugin, Plugin
 from logquill.plugins.redact_plugin import RedactPlugin
+from logquill.plugins.run_plugin import RunPlugin
 from logquill.plugins.sampling_plugin import SamplingPlugin
 from logquill.plugins.slack_alert_plugin import SlackAlertPlugin
 from logquill.plugins.tamper_evident_plugin import TamperEvidentPlugin
+from logquill.plugins.trace_context_plugin import TraceContextPlugin
 from logquill.records import LogRecord
 from logquill.transports.batching_transport import BatchingTransport
 from logquill.transports.cloud.app_insights_transport import AppInsightsTransport
@@ -19,6 +23,7 @@ from logquill.transports.cloud.cloudwatch_transport import CloudWatchTransport
 from logquill.transports.cloud.datadog_transport import DatadogTransport
 from logquill.transports.cloud.elasticsearch_transport import ElasticsearchTransport
 from logquill.transports.cloud.new_relic_transport import NewRelicTransport
+from logquill.transports.cloud.syslog_transport import SyslogTransport
 from logquill.transports.console_transport import ConsoleTransport
 from logquill.transports.file_transport import FileTransport
 from logquill.transports.http_transport import HTTPTransport
@@ -36,7 +41,7 @@ from logquill.transports.sql.postgres_transport import PostgresTransport
 from logquill.transports.sql.sqlite_transport import SQLiteTransport
 from logquill.transports.transport import CollectingTransport, Transport
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "AlertingPlugin",
@@ -60,6 +65,7 @@ __all__ = [
     "JSONFormatter",
     "KafkaTransport",
     "Level",
+    "LogQuillAdapter",
     "LogRecord",
     "Logger",
     "MongoDBTransport",
@@ -73,13 +79,19 @@ __all__ = [
     "RabbitMQTransport",
     "RedactPlugin",
     "RedisTransport",
+    "RunPlugin",
     "SQLLogRow",
     "SQLiteTransport",
     "SQSTransport",
     "SamplingPlugin",
     "SlackAlertPlugin",
+    "SyslogTransport",
     "TamperEvidentPlugin",
+    "TraceContextPlugin",
     "Transport",
+    "load_config",
+    "logger_from_env",
+    "logger_from_file",
     "parse_level",
     "__version__",
 ]

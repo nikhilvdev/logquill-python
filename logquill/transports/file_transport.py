@@ -1,15 +1,45 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TextIO
+from typing import Any, BinaryIO, TextIO, cast
 
 from logquill.formatter import Formatter
 from logquill.records import LogRecord
 from logquill.transports.transport import Transport
 
 
+def _load_fernet(encrypt_key: bytes | str) -> Any:
+    try:
+        from cryptography.fernet import Fernet  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise ImportError(
+            "FileTransport(encrypt_key=...) requires the optional `cryptography` "
+            "dependency — install with `pip install logquill[crypto]`."
+        ) from exc
+    key = encrypt_key.encode("utf-8") if isinstance(encrypt_key, str) else encrypt_key
+    try:
+        return Fernet(key)
+    except Exception as exc:
+        raise ValueError(
+            "FileTransport(encrypt_key=...): not a valid Fernet key — generate one "
+            "with `cryptography.fernet.Fernet.generate_key()`."
+        ) from exc
+
+
 class FileTransport(Transport):
-    """Appends formatted records to a file, rotating when it exceeds `max_bytes`."""
+    """Appends formatted records to a file, rotating when it exceeds `max_bytes`.
+
+    Pass `encrypt_key` (a `cryptography.fernet.Fernet` key, from
+    `Fernet.generate_key()`) to encrypt each line before writing — worth
+    doing here specifically because cloud transports typically already
+    encrypt server-side, but a local log file on disk usually doesn't.
+    Requires the optional `cryptography` dependency
+    (`pip install logquill[crypto]`), imported lazily so `FileTransport`
+    has zero dependencies as long as `encrypt_key` stays unset. Encrypted
+    files are append-only ciphertext, one Fernet token per line — not
+    human-readable, and not `FileTransport`'s job to decrypt back; do that
+    with the same key via `Fernet.decrypt()` per line when reading.
+    """
 
     def __init__(
         self,
@@ -18,16 +48,28 @@ class FileTransport(Transport):
         formatter: Formatter | None = None,
         max_bytes: int = 10 * 1024 * 1024,
         backup_count: int = 5,
+        encrypt_key: bytes | str | None = None,
     ) -> None:
         super().__init__(formatter)
         self.path = Path(path)
         self.max_bytes = max_bytes
         self.backup_count = backup_count
+        self._fernet: Any = _load_fernet(encrypt_key) if encrypt_key is not None else None
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._file: TextIO = self.path.open("a", encoding="utf-8")
+        self._file: TextIO | BinaryIO = self._open()
+
+    def _open(self) -> TextIO | BinaryIO:
+        if self._fernet is not None:
+            return self.path.open("ab")
+        return self.path.open("a", encoding="utf-8")
 
     def write(self, formatted: str, record: LogRecord) -> None:
-        self._file.write(formatted + "\n")
+        if self._fernet is not None:
+            cast(BinaryIO, self._file).write(
+                self._fernet.encrypt(formatted.encode("utf-8")) + b"\n"
+            )
+        else:
+            cast(TextIO, self._file).write(formatted + "\n")
         self._file.flush()
         if 0 < self.max_bytes <= self._file.tell():
             self._rotate()
@@ -46,7 +88,7 @@ class FileTransport(Transport):
             self.path.rename(backup)
         else:
             self.path.unlink(missing_ok=True)
-        self._file = self.path.open("a", encoding="utf-8")
+        self._file = self._open()
 
     def close(self) -> None:
         self._file.close()

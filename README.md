@@ -14,17 +14,19 @@ Sibling to [`logquill` on npm](https://www.npmjs.com/package/logquill)
 across a Python + Node stack.
 
 Status: pre-release, under active development. The core `Logger`, level
-filtering, transports, and the plugin pipeline are implemented;
-non-blocking async dispatch is not yet — see `CHANGELOG.md` for what's
-landed so far.
+filtering, transports, the plugin pipeline, and agentic/harness tracing are
+implemented; non-blocking async dispatch is not yet — see `CHANGELOG.md`
+for what's landed so far.
 
 ## Features
 
 - **Structured by default** — every call carries a `meta` dict, not just a message string
 - **Cross-language record shape** — identical JSON shape and level names/weights as [`logquill` on npm](https://www.npmjs.com/package/logquill)
-- **Pluggable transports** — `ConsoleTransport` (colorized, stderr for errors), `FileTransport` (rotation), `HTTPTransport` (batched), plus SQL/NoSQL/message-queue/cloud-native sinks (see [Transports](#transports)); write your own by subclassing `Transport`
+- **Pluggable transports** — `ConsoleTransport` (colorized, stderr for errors), `FileTransport` (rotation, optional encryption-at-rest), `HTTPTransport` (batched), `SyslogTransport` (RFC 5424, UDP/TCP), plus SQL/NoSQL/message-queue/cloud-native sinks (see [Transports](#transports)); write your own by subclassing `Transport`
 - **Pluggable formatters** — `JSONFormatter` out of the box; implement `format(record) -> str` for your own
-- **Plugin pipeline** — `ContextPlugin`, `RedactPlugin` (by key), `PIIRedactPlugin` (by pattern), `SamplingPlugin` (with tail-based elevation), `TamperEvidentPlugin` (hash-chained logs), and `AlertingPlugin` (`SlackAlertPlugin`/`PagerDutyAlertPlugin`/`EmailAlertPlugin`, deduplicated) out of the box; a broken plugin can't crash logging; `.use()` also accepts a plain function, no subclassing required (see [Plugins](#plugins))
+- **Config from file/env** — `load_config(dict)`, `logger_from_file(path)` (JSON/YAML), `logger_from_env()` build a `Logger` from one config shape — see [Config](#config)
+- **Plugin pipeline** — `ContextPlugin`, `RedactPlugin` (by key), `PIIRedactPlugin` (by pattern), `SamplingPlugin` (with tail-based elevation), `TamperEvidentPlugin` (hash-chained logs), `TraceContextPlugin` (cross-service trace correlation), and `AlertingPlugin` (`SlackAlertPlugin`/`PagerDutyAlertPlugin`/`EmailAlertPlugin`, deduplicated) out of the box; a broken plugin can't crash logging; `.use()` also accepts a plain function, no subclassing required (see [Plugins](#plugins))
+- **Agentic & harness tracing** — `.child()` loggers, `RunPlugin`, `.thought()/.action()/.observation()/.decision()`, `with agent_log.span(...)`, and framework adapters — `LangChainAdapter` (`pip install logquill[langchain]`, covers LangGraph for free), `CrewAIAdapter` (`pip install logquill[crewai]`), `LlamaIndexAdapter` (`pip install logquill[llamaindex]`), and `AutoGenAdapter` (`pip install logquill[autogen]`) — see [Agentic & harness tracing](#agentic--harness-tracing)
 - **Zero required runtime dependencies** — stdlib only; `aiohttp` is opt-in, for async HTTP
 - **Typed throughout** — `mypy --strict` clean on the public API
 - *(planned)* non-blocking async dispatch, `contextvars`-based context propagation — see `CHANGELOG.md`
@@ -62,6 +64,61 @@ from logquill import JSONFormatter
 
 print(JSONFormatter().format(record))
 # '{"timestamp":"2026-08-27T18:04:12.345Z","level":"INFO","logger":"app","message":"user signed up","meta":{"user_id":42,"plan":"pro"}}'
+```
+
+## Config
+
+Build a `Logger` from a config dict, a JSON/YAML file, or the environment,
+instead of wiring transports/plugins up by hand — the same shape across all
+three:
+
+```python
+from logquill import load_config
+
+logger = load_config({
+    "name": "app",
+    "level": "INFO",
+    "transports": [{"type": "console"}],
+    "plugins": [{"type": "context", "options": {"service": "api", "env": "prod"}}],
+})
+logger.info("ready")
+```
+
+```python
+from logquill import logger_from_file
+
+logger = logger_from_file("config.json")  # or config.yaml — needs `pip install logquill[yaml]`
+```
+
+```python
+import os
+from logquill import logger_from_env
+
+os.environ["LOGQUILL_CONFIG_FILE"] = "config.json"
+os.environ["LOGQUILL_LEVEL"] = "DEBUG"  # always overrides the file's level
+
+logger = logger_from_env()  # prefix defaults to "LOGQUILL_"
+```
+
+A small built-in `"type"` registry covers the zero-dependency transports/
+plugins (`console`, `file`, `http`; `context`, `redact`, `sampling`,
+`trace_context`, `run`, `pii_redact`, `tamper_evident`). Anything else —
+every cloud/SQL/NoSQL/queue transport, the alerting plugins, a framework
+adapter, or your own subclass — goes through `"class"` instead, a
+fully-qualified dotted path resolved the same way `logging.config.
+dictConfig` resolves one:
+
+```python
+from logquill import load_config
+
+logger = load_config({
+    "transports": [
+        {
+            "class": "logquill.transports.cloud.datadog_transport.DatadogTransport",
+            "options": {"api_key": "..."},
+        }
+    ],
+})
 ```
 
 ## Transports
@@ -247,6 +304,48 @@ pauses sends until it elapses — dropping (not requeuing) any batch
 flushed during that window, since New Relic blocks the rest of that
 minute on a rate-limit breach anyway.
 
+`SyslogTransport` sends each record as one RFC 5424 message over UDP
+(default) or TCP — stdlib `socket` only, no dependency, and not a batching
+transport (syslog is one-message-per-call, unlike the HTTP-API transports
+above):
+
+```python
+from logquill import Logger, SyslogTransport
+
+transport = SyslogTransport(host="syslog.internal", port=514, app_name="app")
+logger = Logger("app", transports=[transport])
+
+logger.error("payment webhook failed")
+```
+
+### Encryption-at-rest for file logs
+
+`FileTransport(encrypt_key=...)` encrypts each line with
+`cryptography.fernet.Fernet` before writing — a local log file usually
+isn't encrypted server-side the way a cloud sink already is:
+
+```python
+from cryptography.fernet import Fernet
+from logquill import FileTransport, Logger
+
+key = Fernet.generate_key()  # store this somewhere safe — you need it to decrypt
+transport = FileTransport("app.log", encrypt_key=key)
+logger = Logger("app", transports=[transport])
+
+logger.info("card charged", user_id=42)
+logger.close()
+
+# decrypt back, one Fernet token per line
+fernet = Fernet(key)
+with open("app.log", "rb") as f:
+    for line in f:
+        print(fernet.decrypt(line.strip()).decode("utf-8"))
+```
+
+Needs the optional `cryptography` dependency (`pip install
+logquill[crypto]`), imported lazily — `FileTransport` has zero
+dependencies as long as `encrypt_key` stays unset.
+
 ## Plugins
 
 Plugins hook into the pipeline around each log call: `before_log(record)` can
@@ -389,6 +488,178 @@ logger.fatal("database unreachable")  # also pages via PagerDuty (threshold=FATA
 Write your own destination by subclassing `AlertingPlugin` and implementing
 `send_alert(record, occurrences)`; thresholding, deduplication, and the
 never-block-the-caller behavior are all handled by the base class.
+
+## Agentic & harness tracing
+
+`.child()` makes a namespaced logger that shares the parent's transports —
+attach run-scoped plugins to it without touching the parent's pipeline.
+`RunPlugin` stamps `meta.run_id` and an incrementing `meta.step`; the
+`.thought()/.action()/.observation()/.decision()` convenience methods are
+`.info()` with `meta.kind` pre-set, for tagging agent reasoning steps; and
+`with agent_log.span(name):` stamps `meta.span_id`/`meta.duration_ms` on
+exit, with every record logged inside the block automatically getting
+`meta.parent_span_id` — so a full run reconstructs its exact order and
+nesting by sorting on `run_id`/`step`/`span_id`/`parent_span_id`:
+
+```python
+from logquill import CollectingTransport, Logger, RunPlugin
+
+sink = CollectingTransport()
+log = Logger("app", transports=[sink])
+agent_log = log.child("agent").use(RunPlugin())
+
+agent_log.thought("deciding what to do")
+with agent_log.span("call_llm"):
+    agent_log.action("call the model")
+    agent_log.observation("got a response")
+agent_log.decision("final answer ready")
+
+for record in sink.records:
+    print(record["meta"]["step"], record["meta"].get("kind"), record["message"])
+# 0 thought deciding what to do
+# 1 action call the model
+# 2 observation got a response
+# 3 span call_llm
+# 4 decision final answer ready
+```
+
+### Cross-service trace correlation
+
+`TraceContextPlugin` stamps `meta.trace_id` — distinct from `run_id`:
+`trace_id` follows one request across services, `run_id` scopes one agent
+run. It reads an active OpenTelemetry span's trace id first (if
+`opentelemetry-api` is importable and a span is current), then an inbound
+W3C `traceparent` / AWS X-Ray / GCP trace header — handed in via
+`set_traceparent()` for the current thread/asyncio task, the way request
+middleware would propagate one — and generates a fresh id only if neither
+is available:
+
+```python
+from logquill import Logger, TraceContextPlugin
+from logquill.plugins.trace_context_plugin import reset_traceparent, set_traceparent
+
+# e.g. set once in HTTP middleware, from the inbound request's header
+token = set_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+try:
+    logger = Logger("billing-service", plugins=[TraceContextPlugin()])
+    record = logger.info("charged card")
+finally:
+    reset_traceparent(token)
+
+assert record["meta"]["trace_id"] == "4bf92f3577b34da6a3ce929d0e0e4736"
+```
+
+### Framework adapters
+
+`LogQuillAdapter` is a thin base class for mapping a framework's own event
+callbacks onto `.thought()/.action()/.observation()/.decision()` and
+`.span()` — never a reimplementation of tracing logic per framework.
+`LangChainAdapter` (covers LangGraph for free, since it shares LangChain's
+callback system) ships behind the optional `langchain` extra:
+
+```bash
+pip install logquill[langchain]
+```
+
+```python
+from logquill import Logger, RunPlugin
+from logquill.adapters.langchain import LangChainAdapter
+
+log = Logger("app")
+handler = LangChainAdapter(log.child("agent").use(RunPlugin()))
+llm = ChatOpenAI(callbacks=[handler])  # pass in like any other tracing handler
+```
+
+LangChain's own `run_id`/`parent_run_id` are written directly onto
+`meta.span_id`/`meta.parent_span_id` — the shapes already match, so this is
+field renaming, not translation. `langchain-core` is never imported unless
+you import `logquill.adapters.langchain` yourself.
+
+`CrewAIAdapter` ships behind the optional `crewai` extra, listening on
+CrewAI's own event bus rather than a single callback handler:
+
+```bash
+pip install logquill[crewai]
+```
+
+```python
+from logquill import Logger, RunPlugin
+from logquill.adapters.crewai import CrewAIAdapter
+
+log = Logger("app")
+listener = CrewAIAdapter(log.child("agent").use(RunPlugin()))  # active as soon as it's constructed
+crew = Crew(agents=[...], tasks=[...])
+crew.kickoff()
+```
+
+A crew kickoff and each task within it open/close a `.span()`; agent
+execution, tool usage, and LLM calls become `.action()`/`.observation()`/
+`.error()` pairs carrying `duration_ms`. Same field-renaming approach as
+`LangChainAdapter`: CrewAI's own event bus already threads
+`event.parent_event_id` and, on every "ended" event, `event.started_event_id`
+(the matching "started" event's id) through its own internal
+`contextvars`-backed scope stack — those map directly onto
+`meta.parent_span_id`/`meta.span_id`. `crewai` is never imported unless you
+import `logquill.adapters.crewai` yourself.
+
+`LlamaIndexAdapter` ships behind the optional `llamaindex` extra:
+
+```bash
+pip install logquill[llamaindex]
+```
+
+```python
+from logquill import Logger, RunPlugin
+from logquill.adapters.llamaindex import LlamaIndexAdapter
+
+log = Logger("app")
+adapter = LlamaIndexAdapter(log.child("agent").use(RunPlugin()))  # active as soon as it's constructed
+index.as_query_engine().query("...")
+```
+
+LlamaIndex splits instrumentation into two cooperating pieces on its own
+global dispatcher, so this adapter registers one of each rather than being a
+handler itself: a span handler for LlamaIndex's own method-level calls
+(`query()`, `chat()`, `retrieve()`, ...), which become `span_id`/
+`duration_ms` records with `parent_span_id` set for a nested call (e.g.
+`retrieve()` inside `query()`); and an event handler for named events fired
+*within* those calls (LLM calls, retrieval, synthesis, embedding, agent
+steps), classified generically by name suffix (`*StartEvent` ->
+`.action()`, `*EndEvent` -> `.observation()`, `*ErrorEvent` -> `.error()`)
+rather than enumerated one by one, so a new LlamaIndex event type needs no
+adapter change to show up correctly. `llama-index-core` is never imported
+unless you import `logquill.adapters.llamaindex` yourself.
+
+`AutoGenAdapter` ships behind the optional `autogen` extra. Unlike the
+other three, it's not a callback/event-bus registration — (Microsoft)
+AutoGen's actual integration point is a stdlib `logging.Handler` attached
+to `autogen_core.EVENT_LOGGER_NAME`, where model clients and tools log
+structured event *objects* (not strings), so that's what this adapter is:
+
+```bash
+pip install logquill[autogen]
+```
+
+```python
+from logquill import Logger, RunPlugin
+from logquill.adapters.autogen import AutoGenAdapter
+
+log = Logger("app")
+adapter = AutoGenAdapter(log.child("agent").use(RunPlugin()))  # active immediately
+```
+
+Each event becomes a flat `.action()`/`.observation()`/`.error()` record
+carrying whatever fields AutoGen put on it (`agent_id`, token counts, tool
+name/arguments/result, ...). Worth knowing before relying on it: unlike the
+other three adapters, AutoGen's structured events carry no call-level
+`span_id`/`parent_span_id`-equivalent, so there's no tree to reconstruct —
+just per-event correlation via `agent_id`. **Covers (Microsoft)
+`autogen-core`/`autogen-agentchat` only — not AG2.** AG2 forked from
+AutoGen and, as of its 2026 rewrite, moved onto its own event-driven
+architecture that no longer shares `EVENT_LOGGER_NAME` or any of these
+event classes; that's a real divergence, not just a detail, so it needs its
+own adapter rather than reusing this one. `autogen-core` is never imported
+unless you import `logquill.adapters.autogen` yourself.
 
 ## Development
 
