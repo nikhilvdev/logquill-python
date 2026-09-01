@@ -26,7 +26,7 @@ for what's landed so far.
 - **Pluggable formatters** — `JSONFormatter` out of the box; implement `format(record) -> str` for your own
 - **Config from file/env** — `load_config(dict)`, `logger_from_file(path)` (JSON/YAML), `logger_from_env()` build a `Logger` from one config shape — see [Config](#config)
 - **Plugin pipeline** — `ContextPlugin`, `RedactPlugin` (by key), `PIIRedactPlugin` (by pattern), `SamplingPlugin` (with tail-based elevation), `TamperEvidentPlugin` (hash-chained logs), `TraceContextPlugin` (cross-service trace correlation), and `AlertingPlugin` (`SlackAlertPlugin`/`PagerDutyAlertPlugin`/`EmailAlertPlugin`, deduplicated) out of the box; a broken plugin can't crash logging; `.use()` also accepts a plain function, no subclassing required (see [Plugins](#plugins))
-- **Agentic & harness tracing** — `.child()` loggers, `RunPlugin`, `.thought()/.action()/.observation()/.decision()`, `with agent_log.span(...)`, and framework adapters — `LangChainAdapter` (`pip install logquill[langchain]`, covers LangGraph for free), `CrewAIAdapter` (`pip install logquill[crewai]`), `LlamaIndexAdapter` (`pip install logquill[llamaindex]`), and `AutoGenAdapter` (`pip install logquill[autogen]`) — see [Agentic & harness tracing](#agentic--harness-tracing)
+- **Agentic & harness tracing** — `.child()` loggers, `RunPlugin`, `.thought()/.action()/.observation()/.decision()`, `with agent_log.span(...)`, and framework adapters — `LangChainAdapter` (`pip install logquill[langchain]`), `LangGraphAdapter` (`pip install logquill[langgraph]`, adds checkpoint interrupt/resume events on top), `CrewAIAdapter` (`pip install logquill[crewai]`), `LlamaIndexAdapter` (`pip install logquill[llamaindex]`), and `AutoGenAdapter` (`pip install logquill[autogen]`) — see [Agentic & harness tracing](#agentic--harness-tracing)
 - **Zero required runtime dependencies** — stdlib only; `aiohttp` is opt-in, for async HTTP
 - **Typed throughout** — `mypy --strict` clean on the public API
 - *(planned)* non-blocking async dispatch, `contextvars`-based context propagation — see `CHANGELOG.md`
@@ -554,8 +554,10 @@ assert record["meta"]["trace_id"] == "4bf92f3577b34da6a3ce929d0e0e4736"
 `LogQuillAdapter` is a thin base class for mapping a framework's own event
 callbacks onto `.thought()/.action()/.observation()/.decision()` and
 `.span()` — never a reimplementation of tracing logic per framework.
-`LangChainAdapter` (covers LangGraph for free, since it shares LangChain's
-callback system) ships behind the optional `langchain` extra:
+`LangChainAdapter` ships behind the optional `langchain` extra. LangGraph
+nodes run as ordinary LangChain `Runnable`s, so it already captures node
+execution with zero extra work — for LangGraph's own checkpoint
+interrupt/resume events too, see [LangGraph](#langgraph) below:
 
 ```bash
 pip install logquill[langchain]
@@ -574,6 +576,43 @@ LangChain's own `run_id`/`parent_run_id` are written directly onto
 `meta.span_id`/`meta.parent_span_id` — the shapes already match, so this is
 field renaming, not translation. `langchain-core` is never imported unless
 you import `logquill.adapters.langchain` yourself.
+
+### LangGraph
+
+LangGraph nodes execute as ordinary LangChain `Runnable`s, so
+`LangChainAdapter` alone already covers everything that happens *inside* a
+node — `on_chain_start`/`on_llm_start`/`on_tool_start`/etc. all fire exactly
+as they would for a plain chain. What a plain `BaseCallbackHandler` can't
+see is LangGraph's own checkpoint lifecycle: `on_interrupt`/`on_resume`,
+fired when a graph pauses on an `interrupt()` call (e.g. for human review)
+and later resumes from a persisted checkpoint — LangGraph dispatches those
+two specifically to handlers that are instances of its own
+`GraphCallbackHandler`, which a plain `BaseCallbackHandler` subclass never
+receives. `LangGraphAdapter` is `LangChainAdapter` plus those two:
+
+```bash
+pip install logquill[langgraph]
+```
+
+```python
+from logquill import Logger, RunPlugin
+from logquill.adapters.langgraph import LangGraphAdapter
+
+log = Logger("app")
+handler = LangGraphAdapter(log.child("agent").use(RunPlugin()))
+graph = builder.compile(checkpointer=checkpointer)
+graph.invoke(input, config={"callbacks": [handler], "configurable": {"thread_id": "1"}})
+```
+
+`on_interrupt` becomes `.observation("graph_interrupted", ...)` carrying
+`checkpoint_id`, `status`, `checkpoint_ns` (the subgraph namespace path, if
+nested), and each pending `Interrupt`'s `id`/`value`; `on_resume` becomes
+`.action("graph_resumed", ...)` with the same checkpoint fields. Both use
+the event's own `run_id` as `parent_span_id`, matching the enclosing
+graph's still-open chain span — the graph hasn't ended, just paused.
+`pip install logquill[langgraph]` pulls in a compatible `langchain-core`
+transitively, so installing it alone is enough; `langgraph` is never
+imported unless you import `logquill.adapters.langgraph` yourself.
 
 `CrewAIAdapter` ships behind the optional `crewai` extra, listening on
 CrewAI's own event bus rather than a single callback handler:

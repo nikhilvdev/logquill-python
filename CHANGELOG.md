@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.5.0 - 2026-09-01
+
+- `LangGraphAdapter` (`pip install logquill[langgraph]`) — corrects an
+  overstatement in the 0.4.0 entry below: LangGraph nodes run as ordinary
+  LangChain `Runnable`s, so `LangChainAdapter` alone already captures node
+  execution, but LangGraph also has its own checkpoint lifecycle —
+  `on_interrupt`/`on_resume`, fired when a graph pauses on an `interrupt()`
+  call (e.g. for human review) and later resumes from a persisted
+  checkpoint — that LangGraph dispatches only to handlers that are
+  instances of its own `GraphCallbackHandler`; a plain `BaseCallbackHandler`
+  subclass (all `LangChainAdapter` is) never receives them. `LangGraphAdapter`
+  is `LangChainAdapter` plus those two, mapped to `.observation
+  ("graph_interrupted", ...)`/`.action("graph_resumed", ...)` carrying
+  `checkpoint_id`/`status`/`checkpoint_ns`/pending `Interrupt` payloads, with
+  the event's own `run_id` as `parent_span_id`. `pip install
+  logquill[langgraph]` pulls in a compatible `langchain-core` transitively;
+  `langgraph` is never imported unless `logquill.adapters.langgraph` is
+  imported explicitly.
+
 ## 0.4.0 - 2026-09-01
 
 - Closed three gaps found auditing Phases 1–3 against their own written
