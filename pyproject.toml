@@ -92,6 +92,18 @@ strict = true
 python_version = "3.10"
 files = ["logquill"]
 
+# `cryptography` (optional, lazily imported for `FileTransport(encrypt_key=...)`)
+# is never a direct dev dependency, but `twine` -> `keyring` -> `SecretStorage`
+# pulls it in transitively on Linux only (`SecretStorage` is a Linux-only
+# keyring backend) — so CI (ubuntu-latest) sees it as genuinely importable and
+# flags the `# type: ignore[import-not-found]` as unused, while it's genuinely
+# absent (and the ignore genuinely needed) on macOS/Windows. The import's
+# resolvability is platform-dependent through no fault of this module, so
+# `warn_unused_ignores` is disabled here specifically rather than project-wide.
+[[tool.mypy.overrides]]
+module = "logquill.transports.file_transport"
+warn_unused_ignores = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
