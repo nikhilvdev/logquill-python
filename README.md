@@ -27,9 +27,10 @@ for what's landed so far.
 - **Config from file/env** — `load_config(dict)`, `logger_from_file(path)` (JSON/YAML), `logger_from_env()` build a `Logger` from one config shape — see [Config](#config)
 - **Plugin pipeline** — `ContextPlugin`, `RedactPlugin` (by key), `PIIRedactPlugin` (by pattern), `SamplingPlugin` (with tail-based elevation), `TamperEvidentPlugin` (hash-chained logs), `TraceContextPlugin` (cross-service trace correlation), and `AlertingPlugin` (`SlackAlertPlugin`/`PagerDutyAlertPlugin`/`EmailAlertPlugin`, deduplicated) out of the box; a broken plugin can't crash logging; `.use()` also accepts a plain function, no subclassing required (see [Plugins](#plugins))
 - **Agentic & harness tracing** — `.child()` loggers, `RunPlugin`, `.thought()/.action()/.observation()/.decision()`, `with agent_log.span(...)`, and framework adapters — `LangChainAdapter` (`pip install logquill[langchain]`), `LangGraphAdapter` (`pip install logquill[langgraph]`, adds checkpoint interrupt/resume events on top), `CrewAIAdapter` (`pip install logquill[crewai]`), `LlamaIndexAdapter` (`pip install logquill[llamaindex]`), and `AutoGenAdapter` (`pip install logquill[autogen]`) — see [Agentic & harness tracing](#agentic--harness-tracing)
+- **Non-blocking async dispatch** — `Logger(async_dispatch=True)` moves transport writes onto a background thread with a bounded queue and a configurable backpressure policy (`drop_oldest`/`drop_newest`/`block`); `flush()`/`flush_async()` and a `with_lambda`/`with_cloud_function`/`with_azure_function` decorator make serverless shutdown safe — see [Async dispatch & serverless safety](#async-dispatch--serverless-safety)
 - **Zero required runtime dependencies** — stdlib only; `aiohttp` is opt-in, for async HTTP
 - **Typed throughout** — `mypy --strict` clean on the public API
-- *(planned)* non-blocking async dispatch, `contextvars`-based context propagation — see `CHANGELOG.md`
+- *(planned)* `contextvars`-based context propagation — see `CHANGELOG.md`
 
 ## Install
 
@@ -699,6 +700,85 @@ architecture that no longer shares `EVENT_LOGGER_NAME` or any of these
 event classes; that's a real divergence, not just a detail, so it needs its
 own adapter rather than reusing this one. `autogen-core` is never imported
 unless you import `logquill.adapters.autogen` yourself.
+
+## Async dispatch & serverless safety
+
+By default, every log call dispatches to its transports synchronously — a
+slow or down sink adds latency directly to the call that triggered it. Pass
+`async_dispatch=True` to move dispatch (the transport writes, plus the
+`after_log` plugin hooks that follow them) onto a background thread instead,
+so `.info()`/`.error()`/... return as soon as `before_log` plugin hooks have
+run, without waiting on any transport's I/O:
+
+```python
+from logquill import ConsoleTransport, HTTPTransport, Logger
+
+logger = Logger(
+    "app",
+    transports=[ConsoleTransport(), HTTPTransport("https://logs.example.com/ingest")],
+    async_dispatch=True,
+    max_queue_size=10_000,   # bounds memory if a transport stalls
+    backpressure="drop_oldest",  # or "drop_newest" / "block"
+)
+```
+
+`max_queue_size` bounds how many not-yet-dispatched records can pile up in
+memory if a transport stalls (a down HTTP endpoint, a full disk). Once that
+bound is hit, `backpressure` decides what happens next — `"drop_oldest"`
+(default) evicts the oldest queued record to make room, `"drop_newest"`
+discards the record that just triggered the overflow, and `"block"` makes
+the calling thread wait for space instead of dropping anything. Either drop
+policy logs at most one warning per minute while actively dropping, not one
+per dropped record. `Logger.child()` shares its parent's queue/background
+thread rather than starting a second one.
+
+Call `logger.close()` on ordinary process shutdown — it drains any records
+still queued (up to an optional `timeout`, default 5 seconds) and then
+closes every transport:
+
+```python
+logger.close(timeout=5.0)
+```
+
+For code that keeps running afterward (a request handler, a serverless
+invocation), use `logger.flush()` instead — it drains the queue and flushes
+each transport's own internal buffer (see `BatchingTransport`) *without*
+closing anything, so the logger is still usable right after:
+
+```python
+logger.flush(timeout=2.0)          # sync callers
+await logger.flush_async(timeout=2.0)  # async callers — awaits instead of blocking
+```
+
+### Serverless: flush before the container freezes
+
+A serverless execution environment (AWS Lambda, GCP Cloud Functions, Azure
+Functions) can freeze or tear down immediately after your handler returns —
+a record still sitting in the async queue at that instant may never reach
+its transport. `with_lambda` wraps a handler so `flush()`/`flush_async()`
+happens automatically, on both a normal return and an exception, before
+control goes back to the platform:
+
+```python
+from logquill import ConsoleTransport, Logger, with_lambda
+
+logger = Logger("app", transports=[ConsoleTransport()], async_dispatch=True)
+
+
+@with_lambda(logger)
+def handler(event, context):
+    logger.info("processing request", request_id=event["requestId"])
+    return {"statusCode": 200}
+```
+
+It flushes, never closes — a warm container reuses the same `Logger`/
+transports on its next invocation, and `close()` would release resources
+(an open file handle, a pooled connection) that invocation needs. Works
+with `async def` handlers too, and accepts a list of loggers if a handler
+logs through more than one. `with_cloud_function`/`with_azure_function` are
+the same decorator under a name that reads naturally at each platform's own
+handler definition — the flush-before-return behavior is identical across
+all three.
 
 ## Development
 

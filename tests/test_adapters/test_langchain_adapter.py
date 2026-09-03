@@ -72,7 +72,7 @@ def test_full_run_reconstructs_span_tree(monkeypatch: pytest.MonkeyPatch) -> Non
     llm_start, llm_end, tool_start, tool_end, finish, chain_close = sink.records
 
     # 5+ steps, at least one nested span — sorted by (parent_span_id,
-    # span_id) reconstructs the exact tree, per Phase 5's exit criterion.
+    # span_id) reconstructs the exact call tree.
     assert llm_start["meta"]["span_id"] == str(llm_run)
     assert llm_start["meta"]["parent_span_id"] == str(chain_run)
     assert llm_end["meta"]["span_id"] == str(llm_run)

@@ -16,6 +16,7 @@ from logquill.plugins.slack_alert_plugin import SlackAlertPlugin
 from logquill.plugins.tamper_evident_plugin import TamperEvidentPlugin
 from logquill.plugins.trace_context_plugin import TraceContextPlugin
 from logquill.records import LogRecord
+from logquill.serverless import with_azure_function, with_cloud_function, with_lambda
 from logquill.transports.batching_transport import BatchingTransport
 from logquill.transports.cloud.app_insights_transport import AppInsightsTransport
 from logquill.transports.cloud.cloud_logging_transport import CloudLoggingTransport
@@ -40,12 +41,14 @@ from logquill.transports.sql.mysql_transport import MySQLTransport
 from logquill.transports.sql.postgres_transport import PostgresTransport
 from logquill.transports.sql.sqlite_transport import SQLiteTransport
 from logquill.transports.transport import CollectingTransport, Transport
+from logquill.worker import AsyncWorker
 
 __version__ = "0.5.0"
 
 __all__ = [
     "AlertingPlugin",
     "AppInsightsTransport",
+    "AsyncWorker",
     "BaseQueueTransport",
     "BaseSQLTransport",
     "BatchingTransport",
@@ -93,5 +96,8 @@ __all__ = [
     "logger_from_env",
     "logger_from_file",
     "parse_level",
+    "with_azure_function",
+    "with_cloud_function",
+    "with_lambda",
     "__version__",
 ]

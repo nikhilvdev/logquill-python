@@ -10,6 +10,7 @@ from logquill.plugins.plugin import FunctionPlugin, MiddlewareFunc, Plugin
 from logquill.records import LogRecord, create_record
 from logquill.span import SpanContext, current_span_id
 from logquill.transports.transport import Transport
+from logquill.worker import AsyncWorker, BackpressurePolicy
 
 _logger = logging.getLogger("logquill")
 
@@ -21,13 +22,33 @@ class Logger:
         level: int | str | Level = Level.INFO,
         transports: list[Transport] | None = None,
         plugins: list[Plugin | MiddlewareFunc] | None = None,
+        async_dispatch: bool = False,
+        max_queue_size: int = 10_000,
+        backpressure: BackpressurePolicy = "drop_oldest",
     ) -> None:
+        """`async_dispatch=True` moves per-record transport writes (and the
+        `after_log` plugin hooks that follow them) onto a background thread,
+        via an internal `AsyncWorker` — so `.info()`/`.error()`/... return
+        without waiting on a transport's I/O. `before_log` plugin hooks
+        still run synchronously on the caller's thread, since they can
+        filter/transform the record and a later hook or transport needs to
+        see the result in order.
+
+        `max_queue_size`/`backpressure` are only meaningful with
+        `async_dispatch=True` — see `AsyncWorker` for what each
+        `backpressure` policy does under a sustained burst.
+        """
         self.name = name
         self._level = parse_level(level)
         self.transports: list[Transport] = list(transports) if transports else []
         self.plugins: list[Plugin] = []
         for plugin in plugins or []:
             self.use(plugin)
+        self._worker: AsyncWorker | None = (
+            AsyncWorker(max_queue_size=max_queue_size, backpressure=backpressure)
+            if async_dispatch
+            else None
+        )
 
     @property
     def level(self) -> Level:
@@ -62,10 +83,49 @@ class Logger:
         child_logger = Logger(f"{self.name}.{name}", level=self._level, transports=self.transports)
         if fixed_meta:
             child_logger.use(ContextPlugin(**fixed_meta))
+        # Share the parent's worker (if any) rather than spinning up a second
+        # background thread: both loggers write to the same transport
+        # instances, so their dispatch belongs on the same queue/thread.
+        child_logger._worker = self._worker
         return child_logger
 
-    def close(self) -> None:
-        """Close every attached transport. Call on shutdown to flush buffered writes."""
+    def flush(self, timeout: float | None = None) -> bool:
+        """Wait for every record already submitted for async dispatch to
+        finish writing, then flush each transport's own internal buffer
+        (e.g. `BatchingTransport`) — without closing anything.
+
+        Unlike `close()`, safe to call repeatedly mid-lifetime: this is
+        what `with_lambda`/`with_cloud_function`/`with_azure_function` call
+        before a serverless invocation returns, since a warm container
+        reuses this same `Logger`/its transports on the next invocation.
+
+        Returns whether the async queue (if any) fully drained within
+        `timeout`; always `True` when `async_dispatch` wasn't enabled, since
+        dispatch already happened synchronously before this call.
+        """
+        drained = self._worker.drain(timeout) if self._worker is not None else True
+        for transport in self.transports:
+            transport.flush()
+        return drained
+
+    async def flush_async(self, timeout: float | None = None) -> bool:
+        """`asyncio`-friendly `flush()` — awaits the drain instead of
+        blocking the calling thread. See `flush()`.
+        """
+        drained = await self._worker.drain_async(timeout) if self._worker is not None else True
+        for transport in self.transports:
+            transport.flush()
+        return drained
+
+    def close(self, timeout: float | None = 5.0) -> None:
+        """Stop async dispatch (draining any queued records first, up to
+        `timeout` seconds) and close every attached transport. Call on
+        process shutdown — after this, the transports may release
+        resources a later log call would need, so don't call it on a
+        `Logger` you intend to keep using (see `flush()` for that case).
+        """
+        if self._worker is not None:
+            self._worker.close(timeout)
         for transport in self.transports:
             transport.close()
 
@@ -73,6 +133,26 @@ class Logger:
         # a broken error handler must not crash logging either
         with contextlib.suppress(Exception):
             plugin.on_error(exc, record)
+
+    def _dispatch(self, record: LogRecord) -> None:
+        """Write `record` to every transport and run `after_log` hooks.
+        This is the half of `_log` that does I/O — with `async_dispatch=True`
+        it runs on the worker thread instead of the caller's, which is the
+        entire non-blocking-dispatch contract in one method boundary.
+        """
+        for transport in self.transports:
+            try:
+                transport.write(transport.format(record), record)
+            except Exception:
+                # a transport that can't format or write this particular record
+                # (e.g. a circular reference in `meta`) must not crash the caller
+                _logger.exception("%s: failed to write a log record", type(transport).__name__)
+
+        for plugin in self.plugins:
+            try:
+                plugin.after_log(record)
+            except Exception as exc:
+                self._notify_error(plugin, exc, record)
 
     def _log(self, level: Level, message: str, meta: dict[str, Any]) -> LogRecord | None:
         if level < self._level:
@@ -93,19 +173,10 @@ class Logger:
                 return None
             record = result
 
-        for transport in self.transports:
-            try:
-                transport.write(transport.format(record), record)
-            except Exception:
-                # a transport that can't format or write this particular record
-                # (e.g. a circular reference in `meta`) must not crash the caller
-                _logger.exception("%s: failed to write a log record", type(transport).__name__)
-
-        for plugin in self.plugins:
-            try:
-                plugin.after_log(record)
-            except Exception as exc:
-                self._notify_error(plugin, exc, record)
+        if self._worker is not None:
+            self._worker.submit(lambda: self._dispatch(record))
+        else:
+            self._dispatch(record)
 
         return record
 

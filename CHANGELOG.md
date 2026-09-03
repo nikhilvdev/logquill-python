@@ -4,6 +4,40 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Phase 6, async worker, shutdown & serverless safety, complete:
+  - `AsyncWorker` — a bounded, in-memory queue backed by a single daemon
+    thread, with a configurable `backpressure` policy for what happens once
+    that bound is hit under a sustained burst: `drop_oldest` (default,
+    evicts the oldest queued item), `drop_newest` (discards the item that
+    just overflowed the queue), or `block` (the submitting thread waits for
+    space instead of dropping anything). Either drop policy logs at most one
+    warning per minute while actively dropping, not one per drop.
+  - `Logger(async_dispatch=True, max_queue_size=10_000, backpressure=
+    "drop_oldest")` — moves each record's transport writes and `after_log`
+    plugin hooks onto that background thread, so `.info()`/`.error()`/...
+    return without waiting on a transport's I/O; `before_log` hooks still
+    run synchronously, since a later hook or transport needs to see their
+    result in order. `Logger.child()` shares its parent's worker rather than
+    starting a second background thread.
+  - `Logger.flush(timeout=None)` / `await Logger.flush_async(timeout=None)`
+    — drain any queued records and flush each transport's own internal
+    buffer (`Transport.flush()`, a new no-op-by-default hook; already
+    matched by `BatchingTransport`'s existing buffered-batch flush) without
+    closing anything, so the logger stays usable right after. `Logger.close
+    (timeout=5.0)` now drains the queue (up to `timeout`) before closing
+    every transport.
+  - `with_lambda(logger_or_loggers, timeout=5.0)` — wraps a handler so
+    `flush()`/`flush_async()` runs before the handler's result or exception
+    reaches the caller, covering both sync and `async def` handlers.
+    Flushes rather than closes, since a warm serverless container reuses
+    the same `Logger`/transports on its next invocation. `with_cloud_function`
+    and `with_azure_function` are the same decorator under a name that
+    reads naturally at each platform's own handler definition — the
+    flush-before-return behavior needed is identical across all three.
+  - `load_config`/`logger_from_file`/`logger_from_env` accept the new
+    `"async_dispatch"`/`"max_queue_size"`/`"backpressure"` config keys,
+    mapped straight onto the matching `Logger` constructor arguments.
+
 ## 0.5.0 - 2026-09-01
 
 - `LangGraphAdapter` (`pip install logquill[langgraph]`) — corrects an
