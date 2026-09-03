@@ -1,12 +1,13 @@
-"""End-to-end tests matching Phase 5's exit criteria verbatim (CLAUDE.md):
+"""End-to-end tracing tests:
 
 1. A full agent run (5+ steps, at least one nested span) reconstructs exact
    order and nesting when sorted by `meta.span_id`/`meta.parent_span_id`.
 2. A synthetic multi-service call chain shares one `trace_id` end to end.
-3. A `LangChainAdapter`-instrumented chain reconstructs its exact call tree
-   with zero manual instrumentation beyond passing the handler in once —
-   covered separately in `tests/test_adapters/test_langchain_adapter.py`,
-   since it needs the optional-dependency faking setup that lives there.
+
+A `LangChainAdapter`-instrumented chain reconstructing its exact call tree
+with zero manual instrumentation is covered separately in
+`tests/test_adapters/test_langchain_adapter.py`, since it needs the
+optional-dependency faking setup that lives there.
 """
 
 from logquill.logger import Logger

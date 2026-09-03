@@ -96,7 +96,10 @@ def load_config(data: dict[str, Any], *, name: str = "app") -> Logger:
           "plugins": [
             {"type": "context", "options": {"service": "api"}},
             {"type": "sampling", "options": {"rate": 0.1}}
-          ]
+          ],
+          "async_dispatch": true,
+          "max_queue_size": 10000,
+          "backpressure": "drop_oldest"
         }
 
     Each transport/plugin entry needs either `"type"` (a built-in shortcut —
@@ -105,12 +108,24 @@ def load_config(data: dict[str, Any], *, name: str = "app") -> Logger:
     dictConfig` resolves a `class` key — the same trust boundary: only use
     this with config you trust, the same as any other deployment config).
     `"options"` becomes that class's constructor keyword arguments.
+
+    `"async_dispatch"`/`"max_queue_size"`/`"backpressure"` are optional and
+    map directly onto `Logger`'s constructor arguments of the same name —
+    see there for what each does.
     """
     logger_name = data.get("name", name)
     level = data.get("level", "INFO")
     transports = _build(data.get("transports"), _TRANSPORT_TYPES)
     plugins = _build(data.get("plugins"), _PLUGIN_TYPES)
-    return Logger(logger_name, level=level, transports=transports, plugins=plugins)
+    return Logger(
+        logger_name,
+        level=level,
+        transports=transports,
+        plugins=plugins,
+        async_dispatch=data.get("async_dispatch", False),
+        max_queue_size=data.get("max_queue_size", 10_000),
+        backpressure=data.get("backpressure", "drop_oldest"),
+    )
 
 
 def logger_from_file(path: str | Path, *, name: str = "app") -> Logger:

@@ -30,10 +30,11 @@ class AlertingPlugin(Plugin):
     default: level + logger + message) fires `send_alert` right away, on a
     short-lived background thread — so the log call that triggered it is
     never blocked on a webhook, SMTP handshake, or any other I/O, even if
-    the destination is slow or unreachable. This stands in for the shared
-    async dispatch queue a later phase will introduce; once that queue
-    exists, `AlertingPlugin` can route through it instead of spawning its
-    own thread per alert.
+    the destination is slow or unreachable. This plugin spawns its own
+    thread per alert rather than routing through `Logger`'s shared
+    `AsyncWorker` (see `logquill/worker.py`), since a plugin hook runs
+    before dispatch is decided and has no handle on that queue; unifying
+    the two is a possible future simplification, not a correctness gap.
 
     Any further record matching the same dedupe key within
     `dedupe_window_seconds` of the first is *not* sent again — it just
