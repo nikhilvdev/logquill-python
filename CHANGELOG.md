@@ -4,6 +4,34 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Phase 7, advanced context & stdlib bridge, complete:
+  - `bind_context(**values)` — a `contextvars`-based context manager that
+    merges `values` into every `Logger` call underneath it, through any
+    method and any number of function calls deep, without threading them
+    through each signature by hand. Isolated per thread/asyncio task;
+    nested blocks merge, with the innermost value winning on key collision
+    (an explicit call-site `meta` value still wins over anything bound this
+    way). `current_context()` reads the merged dict directly.
+  - `exc_info=` on every `Logger` method (`logger.error("failed",
+    exc_info=e)`) — accepts the same shapes stdlib `logging` does (an
+    exception instance, `True` for the exception currently being handled,
+    or an explicit `(type, value, traceback)` tuple), formats a traceback
+    into `meta["stack"]`, and is never kept in `meta` as the raw exception
+    object, since that isn't serializable. `format_exc_info()` is exported
+    directly for anything that wants the same formatting standalone.
+  - `LogQuillHandler` — a `logging.Handler` subclass that bridges stdlib
+    `logging` calls (including from third-party libraries) into a LogQuill
+    `Logger`, so they flow through the same transports and plugin pipeline
+    as a native `.info()`/`.error()`/... call. `extra=` fields land in
+    `meta`; an attached `exc_info` is formatted into `meta["stack"]` the
+    same way the `Logger`'s own `exc_info=` kwarg is. Level filtering still
+    applies on top of whatever the stdlib logger/handler's own level is set to.
+  - `RateLimitPlugin(max_records, per_seconds)` — drops records once a key
+    (by default `(logger, level)`, or a custom `key_func`) exceeds
+    `max_records` within a rolling per-key window, to cap a noisy loop
+    without silencing the logger's other messages. Bounded by `max_keys`
+    distinct keys tracked at once, evicting the least-recently-seen key's
+    window to make room for a new one.
 - Phase 6, async worker, shutdown & serverless safety, complete:
   - `AsyncWorker` — a bounded, in-memory queue backed by a single daemon
     thread, with a configurable `backpressure` policy for what happens once
