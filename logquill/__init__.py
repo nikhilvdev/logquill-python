@@ -1,6 +1,9 @@
 from logquill.adapters.base import LogQuillAdapter
 from logquill.config import load_config, logger_from_env, logger_from_file
+from logquill.context import bind_context, current_context
+from logquill.exceptions import format_exc_info
 from logquill.formatter import Formatter, JSONFormatter
+from logquill.handler import LogQuillHandler
 from logquill.levels import Level, parse_level
 from logquill.logger import Logger
 from logquill.plugins.alerting_plugin import AlertingPlugin
@@ -9,6 +12,7 @@ from logquill.plugins.email_alert_plugin import EmailAlertPlugin
 from logquill.plugins.pagerduty_alert_plugin import PagerDutyAlertPlugin
 from logquill.plugins.pii_redact_plugin import PIIRedactPlugin
 from logquill.plugins.plugin import FunctionPlugin, Plugin
+from logquill.plugins.rate_limit_plugin import RateLimitPlugin
 from logquill.plugins.redact_plugin import RedactPlugin
 from logquill.plugins.run_plugin import RunPlugin
 from logquill.plugins.sampling_plugin import SamplingPlugin
@@ -69,6 +73,7 @@ __all__ = [
     "KafkaTransport",
     "Level",
     "LogQuillAdapter",
+    "LogQuillHandler",
     "LogRecord",
     "Logger",
     "MongoDBTransport",
@@ -80,6 +85,7 @@ __all__ = [
     "PostgresTransport",
     "PubSubTransport",
     "RabbitMQTransport",
+    "RateLimitPlugin",
     "RedactPlugin",
     "RedisTransport",
     "RunPlugin",
@@ -92,6 +98,9 @@ __all__ = [
     "TamperEvidentPlugin",
     "TraceContextPlugin",
     "Transport",
+    "bind_context",
+    "current_context",
+    "format_exc_info",
     "load_config",
     "logger_from_env",
     "logger_from_file",

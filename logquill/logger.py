@@ -4,6 +4,8 @@ import contextlib
 import logging
 from typing import Any
 
+from logquill.context import current_context
+from logquill.exceptions import format_exc_info
 from logquill.levels import Level, parse_level
 from logquill.plugins.context_plugin import ContextPlugin
 from logquill.plugins.plugin import FunctionPlugin, MiddlewareFunc, Plugin
@@ -157,7 +159,17 @@ class Logger:
     def _log(self, level: Level, message: str, meta: dict[str, Any]) -> LogRecord | None:
         if level < self._level:
             return None
+
+        if "exc_info" in meta:
+            stack = format_exc_info(meta.pop("exc_info"))
+            if stack is not None:
+                meta["stack"] = stack
+
         record = create_record(level=level, logger=self.name, message=message, meta=meta)
+
+        bound_context = current_context()
+        if bound_context:
+            record["meta"] = {**bound_context, **record["meta"]}
 
         parent_span_id = current_span_id()
         if parent_span_id is not None:
@@ -200,6 +212,12 @@ class Logger:
         return self._log(Level.WARN, message, meta)
 
     def error(self, message: str, /, **meta: Any) -> LogRecord | None:
+        """`exc_info=` (an exception instance, `True` for the exception
+        currently being handled, or an explicit `(type, value, traceback)`
+        tuple — the same shapes stdlib `logging` accepts) formats a
+        traceback into `meta["stack"]` and is otherwise not kept in `meta`
+        as-is, since a raw exception object isn't serializable. Every
+        `Logger` method accepts it, not just this one."""
         return self._log(Level.ERROR, message, meta)
 
     def fatal(self, message: str, /, **meta: Any) -> LogRecord | None:

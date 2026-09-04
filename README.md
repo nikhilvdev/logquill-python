@@ -30,7 +30,7 @@ for what's landed so far.
 - **Non-blocking async dispatch** — `Logger(async_dispatch=True)` moves transport writes onto a background thread with a bounded queue and a configurable backpressure policy (`drop_oldest`/`drop_newest`/`block`); `flush()`/`flush_async()` and a `with_lambda`/`with_cloud_function`/`with_azure_function` decorator make serverless shutdown safe — see [Async dispatch & serverless safety](#async-dispatch--serverless-safety)
 - **Zero required runtime dependencies** — stdlib only; `aiohttp` is opt-in, for async HTTP
 - **Typed throughout** — `mypy --strict` clean on the public API
-- *(planned)* `contextvars`-based context propagation — see `CHANGELOG.md`
+- **Context propagation, exception capture & the stdlib bridge** — `bind_context()` (`contextvars`-based, no manual passing), `exc_info=` on any `Logger` method (formatted traceback into `meta["stack"]`), `LogQuillHandler` (bridges stdlib `logging` into a `Logger`), and `RateLimitPlugin` — see [Context propagation, exception capture & the stdlib bridge](#context-propagation-exception-capture--the-stdlib-bridge)
 
 ## Install
 
@@ -779,6 +779,80 @@ logs through more than one. `with_cloud_function`/`with_azure_function` are
 the same decorator under a name that reads naturally at each platform's own
 handler definition — the flush-before-return behavior is identical across
 all three.
+
+## Context propagation, exception capture & the stdlib bridge
+
+`bind_context()` binds request-scoped values for a `with` block — every
+`Logger` call underneath it, through any method and any number of function
+calls deep, picks them up in `meta` automatically, without threading them
+through every function signature by hand:
+
+```python
+from logquill import Logger, bind_context
+
+logger = Logger("app")
+
+def process():
+    return logger.info("processing")  # no request_id passed in — picked up from context
+
+with bind_context(request_id="req-42"):
+    record = process()
+
+assert record["meta"] == {"request_id": "req-42"}
+```
+
+It's backed by a `contextvars.ContextVar`, so concurrent asyncio tasks and
+threads each see their own bound context; nested `bind_context` blocks
+merge, and an explicit call-site value still wins over anything bound this
+way — the same override rule `ContextPlugin` uses.
+
+Pass `exc_info=` (an exception instance, `True` for the exception currently
+being handled, or an explicit `(type, value, traceback)` tuple — the same
+shapes stdlib `logging` accepts) to any `Logger` method to capture a
+formatted traceback into `meta["stack"]`:
+
+```python
+from logquill import Logger
+
+logger = Logger("app")
+
+try:
+    1 / 0
+except ZeroDivisionError as exc:
+    record = logger.error("payment failed", exc_info=exc, order_id=42)
+
+assert record["meta"]["order_id"] == 42
+assert "ZeroDivisionError" in record["meta"]["stack"]
+```
+
+`LogQuillHandler` bridges stdlib `logging` calls — including from
+third-party libraries you don't control — into a `Logger`, so they flow
+through the same transports and plugins instead of needing every call site
+rewritten:
+
+```python
+import logging
+from logquill import Logger, LogQuillHandler
+
+logger = Logger("app")
+logging.getLogger().addHandler(LogQuillHandler(logger))
+
+logging.getLogger("some.library").warning("retrying", extra={"attempt": 2})
+# -> flows through `logger`'s transports as a WARN record with meta: {'attempt': 2}
+```
+
+`RateLimitPlugin` caps how many records with the same `(logger, level)` (or
+a custom `key_func`) pass through per rolling window — for a noisy retry
+loop that would otherwise flood a transport:
+
+```python
+from logquill import Logger, RateLimitPlugin
+
+logger = Logger("app", plugins=[RateLimitPlugin(max_records=5, per_seconds=60)])
+
+for _ in range(100):
+    logger.error("connection refused")  # only the first 5 per minute ship
+```
 
 ## Development
 
