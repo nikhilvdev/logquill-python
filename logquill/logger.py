@@ -18,6 +18,14 @@ _logger = logging.getLogger("logquill")
 
 
 class Logger:
+    """A named, leveled logger that runs records through a plugin pipeline
+    before writing them to one or more transports.
+
+    Construct directly, or via `.child()` to derive a namespaced logger that
+    shares this one's transports. See `__init__` for what `async_dispatch`
+    changes about ordering.
+    """
+
     def __init__(
         self,
         name: str,
@@ -54,9 +62,12 @@ class Logger:
 
     @property
     def level(self) -> Level:
+        """The minimum level this logger currently accepts."""
         return self._level
 
     def set_level(self, level: int | str | Level) -> None:
+        """Change the minimum level this logger accepts; accepts an int, a
+        level name, or a `Level` member."""
         self._level = parse_level(level)
 
     def use(self, plugin: Plugin | MiddlewareFunc) -> Logger:
@@ -200,15 +211,23 @@ class Logger:
     # caller — exactly what the plugin pipeline's hypothesis tests assert
     # never happens (see `tests/test_plugin_pipeline_properties.py`).
     def trace(self, message: str, /, **meta: Any) -> LogRecord | None:
+        """Log at `TRACE`. Returns the emitted record, or `None` if filtered
+        by level or dropped by a plugin."""
         return self._log(Level.TRACE, message, meta)
 
     def debug(self, message: str, /, **meta: Any) -> LogRecord | None:
+        """Log at `DEBUG`. Returns the emitted record, or `None` if filtered
+        by level or dropped by a plugin."""
         return self._log(Level.DEBUG, message, meta)
 
     def info(self, message: str, /, **meta: Any) -> LogRecord | None:
+        """Log at `INFO`. Returns the emitted record, or `None` if filtered
+        by level or dropped by a plugin."""
         return self._log(Level.INFO, message, meta)
 
     def warn(self, message: str, /, **meta: Any) -> LogRecord | None:
+        """Log at `WARN`. Returns the emitted record, or `None` if filtered
+        by level or dropped by a plugin."""
         return self._log(Level.WARN, message, meta)
 
     def error(self, message: str, /, **meta: Any) -> LogRecord | None:
@@ -221,6 +240,8 @@ class Logger:
         return self._log(Level.ERROR, message, meta)
 
     def fatal(self, message: str, /, **meta: Any) -> LogRecord | None:
+        """Log at `FATAL`. Returns the emitted record, or `None` if filtered
+        by level or dropped by a plugin."""
         return self._log(Level.FATAL, message, meta)
 
     def thought(self, message: str, /, **meta: Any) -> LogRecord | None:

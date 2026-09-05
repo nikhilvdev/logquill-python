@@ -69,6 +69,8 @@ class LangChainAdapter(LogQuillAdapter, BaseCallbackHandler):  # type: ignore[mi
     """
 
     def __init__(self, agent_log: Logger) -> None:
+        """Pass the resulting instance into a chain/agent's `callbacks=[...]`
+        — no separate registration step needed."""
         LogQuillAdapter.__init__(self, agent_log)
         BaseCallbackHandler.__init__(self)
         self._open_spans: dict[UUID, SpanContext] = {}
@@ -91,6 +93,8 @@ class LangChainAdapter(LogQuillAdapter, BaseCallbackHandler):  # type: ignore[mi
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> Any:
+        """Opens a `span()` for this chain run, keyed by `run_id` so the
+        matching `on_chain_end`/`on_chain_error` can close it."""
         name = _tool_name(serialized, "chain")
         span = self.log.span(
             name,
@@ -108,6 +112,7 @@ class LangChainAdapter(LogQuillAdapter, BaseCallbackHandler):  # type: ignore[mi
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> Any:
+        """Closes the `span()` opened by the matching `on_chain_start`."""
         span = self._open_spans.pop(run_id, None)
         if span is not None:
             span.__exit__(None, None, None)
@@ -120,6 +125,9 @@ class LangChainAdapter(LogQuillAdapter, BaseCallbackHandler):  # type: ignore[mi
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> Any:
+        """Closes the `span()` opened by the matching `on_chain_start`,
+        propagating `error` into it so the span's own record captures the
+        failure (at `ERROR`, with `meta.error` set)."""
         span = self._open_spans.pop(run_id, None)
         if span is not None:
             span.__exit__(type(error), error, error.__traceback__)
@@ -135,6 +143,8 @@ class LangChainAdapter(LogQuillAdapter, BaseCallbackHandler):  # type: ignore[mi
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> Any:
+        """Records the call's start time (for the matching `on_llm_end`'s
+        `duration_ms`) and emits `.action("llm_start")`."""
         self._call_starts[run_id] = time.monotonic()
         self.log.action("llm_start", **_span_ids(run_id, parent_run_id))
 
@@ -146,6 +156,8 @@ class LangChainAdapter(LogQuillAdapter, BaseCallbackHandler):  # type: ignore[mi
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> Any:
+        """Emits `.observation("llm_end")` with `duration_ms` measured since
+        the matching `on_llm_start`."""
         duration_ms = self._duration_ms(run_id)
         meta = _span_ids(run_id, parent_run_id)
         if duration_ms is not None:
@@ -160,6 +172,9 @@ class LangChainAdapter(LogQuillAdapter, BaseCallbackHandler):  # type: ignore[mi
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> Any:
+        """Emits `.error("llm_error")`; discards the timing recorded by
+        `on_llm_start` without using it, since a failed call has no
+        meaningful `duration_ms` to report here."""
         self._duration_ms(run_id)
         self.log.error("llm_error", error=str(error), **_span_ids(run_id, parent_run_id))
 
@@ -181,6 +196,11 @@ class LangChainAdapter(LogQuillAdapter, BaseCallbackHandler):  # type: ignore[mi
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> Any:
+        """Emits `.action(tool)` for the agent's chosen action; leaves
+        `span_id`/`parent_span_id` unset since `run_id` here is the
+        enclosing chain's own id, not a fresh one — the ambient-span
+        auto-stamp in `Logger._log` supplies the correct
+        `parent_span_id` instead."""
         tool = getattr(action, "tool", "agent_action")
         self.log.action(tool)
 
@@ -192,6 +212,8 @@ class LangChainAdapter(LogQuillAdapter, BaseCallbackHandler):  # type: ignore[mi
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> Any:
+        """Emits `.decision("agent_finish")` for the agent's concluding
+        decision."""
         self.log.decision("agent_finish")
 
     # -- tools: action (start) / observation (end) / error ------------------
@@ -205,6 +227,8 @@ class LangChainAdapter(LogQuillAdapter, BaseCallbackHandler):  # type: ignore[mi
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> Any:
+        """Records the call's start time (for the matching `on_tool_end`'s
+        `duration_ms`) and emits `.action(name)` for the tool call."""
         name = _tool_name(serialized, "tool")
         self._call_starts[run_id] = time.monotonic()
         self.log.action(name, **_span_ids(run_id, parent_run_id))
@@ -217,6 +241,8 @@ class LangChainAdapter(LogQuillAdapter, BaseCallbackHandler):  # type: ignore[mi
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> Any:
+        """Emits `.observation("tool_end")` with `duration_ms` measured
+        since the matching `on_tool_start`."""
         duration_ms = self._duration_ms(run_id)
         meta = _span_ids(run_id, parent_run_id)
         if duration_ms is not None:
@@ -231,5 +257,8 @@ class LangChainAdapter(LogQuillAdapter, BaseCallbackHandler):  # type: ignore[mi
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> Any:
+        """Emits `.error("tool_error")`; discards the timing recorded by
+        `on_tool_start` without using it, since a failed call has no
+        meaningful `duration_ms` to report here."""
         self._duration_ms(run_id)
         self.log.error("tool_error", error=str(error), **_span_ids(run_id, parent_run_id))

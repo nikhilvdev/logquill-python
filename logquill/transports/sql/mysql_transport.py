@@ -7,13 +7,31 @@ from logquill.transports.sql.base_sql_transport import BaseSQLTransport, SQLLogR
 
 
 class MySQLCursorLike(Protocol):
-    def execute(self, sql: str, parameters: Sequence[object] = ()) -> object: ...
+    """The subset of `pymysql`'s cursor this transport calls — implement
+    this shape to inject a fake in tests without installing the real
+    driver."""
+
+    def execute(self, sql: str, parameters: Sequence[object] = ()) -> object:
+        """Execute one parameterized SQL statement."""
+        ...
 
 
 class MySQLConnectionLike(Protocol):
-    def cursor(self) -> MySQLCursorLike: ...
-    def commit(self) -> None: ...
-    def close(self) -> None: ...
+    """The subset of `pymysql`'s connection this transport calls —
+    implement this shape to inject a fake in tests without installing the
+    real driver."""
+
+    def cursor(self) -> MySQLCursorLike:
+        """Return a new cursor on this connection."""
+        ...
+
+    def commit(self) -> None:
+        """Commit the current transaction."""
+        ...
+
+    def close(self) -> None:
+        """Close the connection."""
+        ...
 
 
 class MySQLTransport(BaseSQLTransport):
@@ -38,6 +56,9 @@ class MySQLTransport(BaseSQLTransport):
         table_name: str = "logs",
         ensure_schema: bool = False,
     ) -> None:
+        """`host`/`port`/`user`/`password`/`database` are used only when
+        this transport connects its own `pymysql` connection (ignored if
+        `connection` is given)."""
         super().__init__(
             formatter=formatter,
             max_records=max_records,
@@ -54,6 +75,8 @@ class MySQLTransport(BaseSQLTransport):
         self._connection: MySQLConnectionLike | None = None
 
     def create_table_sql(self) -> str:
+        """MySQL-dialect DDL: `AUTO_INCREMENT` primary key and a native
+        `JSON` column for `meta`, in place of the generic base class DDL."""
         return (
             f"CREATE TABLE IF NOT EXISTS {self.table_name} ("
             "id INT AUTO_INCREMENT PRIMARY KEY, "
@@ -96,6 +119,10 @@ class MySQLTransport(BaseSQLTransport):
         )
 
     def close(self) -> None:
+        """Flushes any remaining buffered records, then closes the
+        self-connected connection — never a connection passed in as
+        `connection`, since this transport doesn't own that connection's
+        lifecycle."""
         super().close()
         if self._injected is None and self._connection is not None:
             self._connection.close()

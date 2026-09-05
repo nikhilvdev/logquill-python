@@ -68,6 +68,9 @@ class AutoGenAdapter(LogQuillAdapter, logging.Handler):
     """
 
     def __init__(self, agent_log: Logger) -> None:
+        """Attaches this adapter as a `logging.Handler` on AutoGen's
+        `EVENT_LOGGER_NAME` logger immediately — active as soon as it's
+        constructed, no separate "start" call needed."""
         LogQuillAdapter.__init__(self, agent_log)
         logging.Handler.__init__(self)
         self._event_logger = logging.getLogger(EVENT_LOGGER_NAME)
@@ -78,10 +81,16 @@ class AutoGenAdapter(LogQuillAdapter, logging.Handler):
         self._event_logger.addHandler(self)
 
     def close(self) -> None:
+        """Detach this handler from AutoGen's event logger, then run the
+        base `logging.Handler.close()`."""
         self._event_logger.removeHandler(self)
         super().close()
 
     def emit(self, record: logging.LogRecord) -> None:
+        """Unpack an `autogen_core` structured event object off `record.msg`
+        and forward it as the matching `.action()`/`.observation()`/
+        `.error()` call; silently ignored if `record.msg` isn't one of
+        those structured event objects (e.g. an ordinary log line)."""
         kwargs = getattr(record.msg, "kwargs", None)
         if not isinstance(kwargs, dict):
             return  # not one of autogen_core.logging's structured event objects

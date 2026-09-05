@@ -24,6 +24,9 @@ class BaseQueueTransport(BatchingTransport[LogRecord]):
         max_records: int = 100,
         max_bytes: int = 1_000_000,
     ) -> None:
+        """`topic` names the queue/topic this transport publishes to —
+        interpreted per concrete backend (a Kafka topic name, an SQS queue
+        URL, a fully-qualified Pub/Sub topic path, ...)."""
         super().__init__(formatter=formatter, max_records=max_records, max_bytes=max_bytes)
         self.topic = topic
 

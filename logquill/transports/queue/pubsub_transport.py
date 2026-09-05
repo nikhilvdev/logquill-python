@@ -9,11 +9,24 @@ from logquill.transports.queue.base_queue_transport import BaseQueueTransport
 
 
 class PubSubFutureLike(Protocol):
-    def result(self) -> object: ...
+    """The subset of the future `google-cloud-pubsub`'s `publish()` returns
+    this transport calls — implement this shape to inject a fake in tests
+    without installing the real driver."""
+
+    def result(self) -> object:
+        """Block until the publish completes, raising on failure."""
+        ...
 
 
 class PubSubTopicLike(Protocol):
-    def publish(self, topic: str, data: bytes) -> PubSubFutureLike: ...
+    """The subset of `google-cloud-pubsub`'s `PublisherClient` this
+    transport calls — implement this shape to inject a fake in tests
+    without installing the real driver."""
+
+    def publish(self, topic: str, data: bytes) -> PubSubFutureLike:
+        """Publish one message to `topic`, returning a future for its
+        result."""
+        ...
 
 
 class PubSubTransport(BaseQueueTransport):
@@ -34,6 +47,8 @@ class PubSubTransport(BaseQueueTransport):
         max_records: int = 100,
         max_bytes: int = 1_000_000,
     ) -> None:
+        """Connects its own `PublisherClient` lazily on first use unless
+        `client` is given."""
         super().__init__(
             topic=topic, formatter=formatter, max_records=max_records, max_bytes=max_bytes
         )

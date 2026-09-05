@@ -52,6 +52,13 @@ class SamplingPlugin(Plugin):
         max_buffered_records: int = 1000,
         max_traces: int = 200,
     ) -> None:
+        """`rng` is injectable for deterministic testing of the sample
+        decision; defaults to `random.random`. `transports` opts into
+        tail-based elevation — see the class docstring — and must be the
+        same transport list given to the `Logger` for buffered records to
+        actually reach the intended sinks. `max_buffered_records`/
+        `max_traces` bound the tail-buffer's memory; the oldest trace is
+        evicted (unflushed) once either is exceeded."""
         if not 0.0 <= rate <= 1.0:
             raise ValueError(f"rate must be between 0 and 1, got {rate!r}")
         self.rate = rate
@@ -66,6 +73,10 @@ class SamplingPlugin(Plugin):
         self._elevated: OrderedDict[object, None] = OrderedDict()
 
     def before_log(self, record: LogRecord) -> LogRecord | None:
+        """Keeps `record` per the sample rate, buffers it under its trace id
+        if dropped and tail-based elevation is active, or — if this or an
+        earlier record for the same trace reached `elevate_at` — flushes the
+        whole buffered trace and lets `record` through unconditionally."""
         transports = self.transports
         trace_id = record["meta"].get(self.trace_key) if transports is not None else None
 

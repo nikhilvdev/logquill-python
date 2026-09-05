@@ -29,6 +29,8 @@ class EmailAlertPlugin(AlertingPlugin):
         timeout: float = 10.0,
         **kwargs: Any,
     ) -> None:
+        """`kwargs` are forwarded to `AlertingPlugin.__init__` (`threshold`,
+        `dedupe_window_seconds`, etc.)."""
         super().__init__(**kwargs)
         self.smtp_host = smtp_host
         self.smtp_port = smtp_port
@@ -40,6 +42,9 @@ class EmailAlertPlugin(AlertingPlugin):
         self.timeout = timeout
 
     def send_alert(self, record: LogRecord, occurrences: int) -> None:
+        """Sends one plaintext email summarizing `record`, opening a fresh
+        SMTP connection per alert (never raises to the caller — see
+        `AlertingPlugin`'s `_safe_send` wrapper)."""
         message = EmailMessage()
         subject = f"[{record['level']}] {record['logger']}"
         if occurrences > 1:

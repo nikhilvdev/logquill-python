@@ -8,10 +8,24 @@ from logquill.transports.sql.base_sql_transport import BaseSQLTransport, SQLLogR
 
 
 class SQLiteConnectionLike(Protocol):
-    def execute(self, sql: str, parameters: Sequence[object] = ()) -> object: ...
-    def executemany(self, sql: str, seq_of_parameters: Iterable[Sequence[object]]) -> object: ...
-    def commit(self) -> None: ...
-    def close(self) -> None: ...
+    """The subset of stdlib `sqlite3`'s connection this transport calls —
+    implement this shape to inject a fake in tests."""
+
+    def execute(self, sql: str, parameters: Sequence[object] = ()) -> object:
+        """Execute one parameterized SQL statement."""
+        ...
+
+    def executemany(self, sql: str, seq_of_parameters: Iterable[Sequence[object]]) -> object:
+        """Execute one SQL statement against many parameter sequences."""
+        ...
+
+    def commit(self) -> None:
+        """Commit the current transaction."""
+        ...
+
+    def close(self) -> None:
+        """Close the connection."""
+        ...
 
 
 class SQLiteTransport(BaseSQLTransport):
@@ -31,6 +45,9 @@ class SQLiteTransport(BaseSQLTransport):
         table_name: str = "logs",
         ensure_schema: bool = False,
     ) -> None:
+        """`filename` is used only when this transport connects its own
+        `sqlite3` connection (ignored if `connection` is given); defaults to
+        an in-memory database."""
         super().__init__(
             formatter=formatter,
             max_records=max_records,
@@ -50,6 +67,10 @@ class SQLiteTransport(BaseSQLTransport):
         return self._connection
 
     def close(self) -> None:
+        """Flushes any remaining buffered records, then closes the
+        self-connected connection — never a connection passed in as
+        `connection`, since this transport doesn't own that connection's
+        lifecycle."""
         super().close()
         if self._injected is None and self._connection is not None:
             self._connection.close()

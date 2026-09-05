@@ -9,9 +9,21 @@ from logquill.transports.queue.base_queue_transport import BaseQueueTransport
 
 
 class KafkaProducerLike(Protocol):
-    def send(self, topic: str, value: bytes, key: bytes | None = None) -> object: ...
-    def flush(self) -> None: ...
-    def close(self) -> None: ...
+    """The subset of `kafka-python`'s `KafkaProducer` this transport calls —
+    implement this shape to inject a fake in tests without installing the
+    real driver."""
+
+    def send(self, topic: str, value: bytes, key: bytes | None = None) -> object:
+        """Publish one message, optionally keyed for partition affinity."""
+        ...
+
+    def flush(self) -> None:
+        """Block until all previously sent messages are acknowledged."""
+        ...
+
+    def close(self) -> None:
+        """Release the producer's connection resources."""
+        ...
 
 
 def _partition_key(record: LogRecord) -> bytes | None:
@@ -43,6 +55,8 @@ class KafkaTransport(BaseQueueTransport):
         max_records: int = 100,
         max_bytes: int = 1_000_000,
     ) -> None:
+        """`bootstrap_servers` is used only when this transport connects its
+        own `KafkaProducer` (ignored if `producer` is given)."""
         super().__init__(
             topic=topic, formatter=formatter, max_records=max_records, max_bytes=max_bytes
         )
@@ -71,6 +85,9 @@ class KafkaTransport(BaseQueueTransport):
         )
 
     def close(self) -> None:
+        """Flushes any remaining buffered records, then closes the
+        self-connected producer — never a producer passed in as `producer`,
+        since this transport doesn't own that connection's lifecycle."""
         super().close()
         if self._injected is None and self._producer is not None:
             self._producer.close()

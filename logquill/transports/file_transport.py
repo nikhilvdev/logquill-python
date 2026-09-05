@@ -50,6 +50,12 @@ class FileTransport(Transport):
         backup_count: int = 5,
         encrypt_key: bytes | str | None = None,
     ) -> None:
+        """`max_bytes` triggers rotation once the file reaches that size
+        (0 disables rotation); `backup_count` bounds how many rotated files
+        are kept (`path.1`, `path.2`, ...) — the oldest is deleted once that
+        many already exist, or, if `backup_count` is 0, the file is simply
+        truncated on rotation rather than kept. `encrypt_key` opts into
+        per-line Fernet encryption — see the class docstring."""
         super().__init__(formatter)
         self.path = Path(path)
         self.max_bytes = max_bytes
@@ -64,6 +70,9 @@ class FileTransport(Transport):
         return self.path.open("a", encoding="utf-8")
 
     def write(self, formatted: str, record: LogRecord) -> None:
+        """Appends `formatted` as one line (encrypted first if `encrypt_key`
+        was set), flushes to disk immediately, and rotates if `max_bytes`
+        has been reached."""
         if self._fernet is not None:
             cast(BinaryIO, self._file).write(
                 self._fernet.encrypt(formatted.encode("utf-8")) + b"\n"
@@ -91,4 +100,5 @@ class FileTransport(Transport):
         self._file = self._open()
 
     def close(self) -> None:
+        """Closes the underlying file handle."""
         self._file.close()

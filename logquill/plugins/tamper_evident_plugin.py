@@ -30,10 +30,15 @@ class TamperEvidentPlugin(Plugin):
     """
 
     def __init__(self, *, genesis_hash: str = GENESIS_HASH) -> None:
+        """`genesis_hash` is the `prev_hash` used for the very first record
+        in the chain; override it to start a new chain that continues from
+        a previously-recorded hash (e.g. across a log rotation)."""
         self._genesis_hash = genesis_hash
         self._last_hash = genesis_hash
 
     def before_log(self, record: LogRecord) -> LogRecord | None:
+        """Stamps `meta.prev_hash`/`meta.hash`, chaining this record onto
+        the previous one this plugin instance processed."""
         prev_hash = self._last_hash
         digest = _compute_hash(record, prev_hash)
         record["meta"] = {**record["meta"], "prev_hash": prev_hash, "hash": digest}

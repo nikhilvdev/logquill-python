@@ -20,11 +20,16 @@ class PagerDutyAlertPlugin(AlertingPlugin):
     """
 
     def __init__(self, routing_key: str, *, timeout: float = 5.0, **kwargs: Any) -> None:
+        """`kwargs` are forwarded to `AlertingPlugin.__init__` (`threshold`,
+        `dedupe_window_seconds`, etc.)."""
         super().__init__(**kwargs)
         self.routing_key = routing_key
         self.timeout = timeout
 
     def send_alert(self, record: LogRecord, occurrences: int) -> None:
+        """POSTs one `trigger` event to PagerDuty's Events API v2; raises if
+        the API responds with an error status (caught by `AlertingPlugin`'s
+        `_safe_send` wrapper, so this never crashes the caller)."""
         summary = f"{record['logger']}: {record['message']}"
         if occurrences > 1:
             summary += f" (x{occurrences})"

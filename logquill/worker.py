@@ -54,6 +54,10 @@ class AsyncWorker:
         max_queue_size: int = 10_000,
         backpressure: BackpressurePolicy = "drop_oldest",
     ) -> None:
+        """Starts the background dispatch thread immediately — a worker is
+        active as soon as it's constructed, no separate "start" call
+        needed. See the class docstring for what `backpressure` does once
+        `max_queue_size` is reached."""
         if max_queue_size < 1:
             raise ValueError(f"max_queue_size must be >= 1, got {max_queue_size}")
         if backpressure not in _VALID_POLICIES:

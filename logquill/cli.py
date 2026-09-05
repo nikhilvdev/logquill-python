@@ -24,6 +24,9 @@ _RESET = "\x1b[0m"
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Builds the `logquill` CLI's argument parser (currently just the
+    `tail` subcommand); split out from `main()` so tests can inspect/exercise
+    it without going through `sys.argv`."""
     parser = argparse.ArgumentParser(
         prog="logquill", description="LogQuill command-line tools for local development."
     )
@@ -221,6 +224,9 @@ def _run_tail(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """The `logquill` console-script entry point: parses `argv` (defaulting
+    to `sys.argv`) and dispatches to the matching subcommand, returning the
+    process exit code."""
     parser = build_parser()
     args = parser.parse_args(argv)
 

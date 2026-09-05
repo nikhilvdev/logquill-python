@@ -8,12 +8,18 @@ from logquill.transports.batching_transport import BatchingTransport
 
 
 class CloudWatchClientLike(Protocol):
+    """The subset of `boto3`'s CloudWatch Logs client this transport calls —
+    implement this shape to inject a fake in tests without installing the
+    real driver."""
+
     def put_log_events(
         self,
         logGroupName: str,
         logStreamName: str,
         logEvents: Sequence[dict[str, Any]],  # noqa: N803
-    ) -> object: ...
+    ) -> object:
+        """Send one batch of chronologically-ordered log events."""
+        ...
 
 
 def _to_millis(iso_timestamp: str) -> int:
@@ -43,6 +49,8 @@ class CloudWatchTransport(BatchingTransport[LogRecord]):
         max_records: int = 100,
         max_bytes: int = 1_000_000,
     ) -> None:
+        """`region` is the AWS region this transport connects its own
+        `boto3` client to (ignored if `client` is given)."""
         super().__init__(formatter=formatter, max_records=max_records, max_bytes=max_bytes)
         self.log_group = log_group
         self.log_stream = log_stream

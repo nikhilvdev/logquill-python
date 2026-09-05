@@ -9,8 +9,17 @@ from logquill.transports.batching_transport import BatchingTransport
 
 
 class RedisClientLike(Protocol):
-    def xadd(self, name: str, fields: dict[str, Any]) -> object: ...
-    def close(self) -> None: ...
+    """The subset of `redis-py`'s `Redis` client this transport calls —
+    implement this shape to inject a fake in tests without installing the
+    real driver."""
+
+    def xadd(self, name: str, fields: dict[str, Any]) -> object:
+        """Append one entry to a Redis Stream."""
+        ...
+
+    def close(self) -> None:
+        """Release the client's connection resources."""
+        ...
 
 
 class RedisTransport(BatchingTransport[LogRecord]):
@@ -32,6 +41,8 @@ class RedisTransport(BatchingTransport[LogRecord]):
         max_records: int = 100,
         max_bytes: int = 1_000_000,
     ) -> None:
+        """`url` is used only when this transport connects its own `redis`
+        client (ignored if `client` is given)."""
         super().__init__(formatter=formatter, max_records=max_records, max_bytes=max_bytes)
         self._injected = client
         self._stream = stream
@@ -57,6 +68,9 @@ class RedisTransport(BatchingTransport[LogRecord]):
         return client
 
     def close(self) -> None:
+        """Flushes any remaining buffered records, then closes the
+        self-connected client — never a client passed in as `client`, since
+        this transport doesn't own that connection's lifecycle."""
         super().close()
         if self._injected is None and self._client is not None:
             self._client.close()

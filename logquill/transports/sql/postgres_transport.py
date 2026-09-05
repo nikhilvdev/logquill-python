@@ -7,13 +7,31 @@ from logquill.transports.sql.base_sql_transport import BaseSQLTransport, SQLLogR
 
 
 class PostgresCursorLike(Protocol):
-    def execute(self, sql: str, parameters: Sequence[object] = ()) -> object: ...
+    """The subset of `psycopg2`'s cursor this transport calls — implement
+    this shape to inject a fake in tests without installing the real
+    driver."""
+
+    def execute(self, sql: str, parameters: Sequence[object] = ()) -> object:
+        """Execute one parameterized SQL statement."""
+        ...
 
 
 class PostgresConnectionLike(Protocol):
-    def cursor(self) -> PostgresCursorLike: ...
-    def commit(self) -> None: ...
-    def close(self) -> None: ...
+    """The subset of `psycopg2`'s connection this transport calls —
+    implement this shape to inject a fake in tests without installing the
+    real driver."""
+
+    def cursor(self) -> PostgresCursorLike:
+        """Return a new cursor on this connection."""
+        ...
+
+    def commit(self) -> None:
+        """Commit the current transaction."""
+        ...
+
+    def close(self) -> None:
+        """Close the connection."""
+        ...
 
 
 class PostgresTransport(BaseSQLTransport):
@@ -34,6 +52,8 @@ class PostgresTransport(BaseSQLTransport):
         table_name: str = "logs",
         ensure_schema: bool = False,
     ) -> None:
+        """`dsn` is used only when this transport connects its own
+        `psycopg2` connection (ignored if `connection` is given)."""
         super().__init__(
             formatter=formatter,
             max_records=max_records,
@@ -46,6 +66,8 @@ class PostgresTransport(BaseSQLTransport):
         self._connection: PostgresConnectionLike | None = None
 
     def create_table_sql(self) -> str:
+        """Postgres-dialect DDL: `SERIAL` primary key and a native `JSONB`
+        column for `meta`, in place of the generic base class DDL."""
         return (
             f"CREATE TABLE IF NOT EXISTS {self.table_name} ("
             "id SERIAL PRIMARY KEY, "
@@ -80,6 +102,10 @@ class PostgresTransport(BaseSQLTransport):
         return cast(PostgresConnectionLike, psycopg2.connect(self._dsn))
 
     def close(self) -> None:
+        """Flushes any remaining buffered records, then closes the
+        self-connected connection — never a connection passed in as
+        `connection`, since this transport doesn't own that connection's
+        lifecycle."""
         super().close()
         if self._injected is None and self._connection is not None:
             self._connection.close()

@@ -18,4 +18,6 @@ class LogQuillAdapter:
     """
 
     def __init__(self, agent_log: Logger) -> None:
+        """`agent_log` is the `Logger` (typically `.child(...)` with a
+        `RunPlugin` attached) every translated event is forwarded onto."""
         self.log = agent_log

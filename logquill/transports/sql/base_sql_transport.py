@@ -50,6 +50,10 @@ class BaseSQLTransport(BatchingTransport[SQLLogRow]):
         table_name: str = "logs",
         ensure_schema: bool = False,
     ) -> None:
+        """`ensure_schema=True` runs `create_table_sql()`'s DDL once, before
+        the first batch send — a dev/test-only convenience, never enabled
+        by default, since schema creation in production is the caller's
+        responsibility (see the class docstring)."""
         super().__init__(formatter=formatter, max_records=max_records, max_bytes=max_bytes)
         self.table_name = table_name
         self.ensure_schema = ensure_schema

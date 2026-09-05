@@ -59,6 +59,11 @@ class PIIRedactPlugin(Plugin):
         presidio_entities: Sequence[str] | None = None,
         presidio_language: str = "en",
     ) -> None:
+        """`patterns` overrides/extends `DEFAULT_PII_PATTERNS` entirely (not
+        merged) when given. `presidio_entities`/`presidio_language` are only
+        used when `use_presidio=True`; loading Presidio happens here, at
+        construction time, so a missing optional dependency fails fast
+        rather than on the first log call."""
         self.patterns: dict[str, re.Pattern[str]] = (
             dict(patterns) if patterns is not None else dict(DEFAULT_PII_PATTERNS)
         )
@@ -85,6 +90,8 @@ class PIIRedactPlugin(Plugin):
         return AnalyzerEngine(), AnonymizerEngine()
 
     def before_log(self, record: LogRecord) -> LogRecord | None:
+        """Recursively redacts PII-shaped substrings anywhere in `meta`'s
+        values, regardless of which key holds them."""
         record["meta"] = self._redact_value(record["meta"], set(), 0)
         return record
 

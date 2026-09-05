@@ -43,6 +43,9 @@ class RateLimitPlugin(Plugin):
         max_keys: int = 1000,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        """`clock` is injectable for deterministic testing of window
+        rollover; defaults to `time.monotonic` so wall-clock adjustments
+        can't shrink or extend a window."""
         if max_records < 1:
             raise ValueError(f"max_records must be at least 1, got {max_records!r}")
         if per_seconds <= 0:
@@ -56,6 +59,9 @@ class RateLimitPlugin(Plugin):
         self._windows: OrderedDict[Hashable, tuple[float, int]] = OrderedDict()
 
     def before_log(self, record: LogRecord) -> LogRecord | None:
+        """Drops `record` if its key's current window has already reached
+        `max_records`; starts a fresh window for a key whose previous
+        window has expired."""
         key = self.key_func(record)
         now = self._clock()
         window = self._windows.get(key)

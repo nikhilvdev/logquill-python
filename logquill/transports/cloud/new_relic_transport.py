@@ -24,6 +24,10 @@ _logger = logging.getLogger("logquill")
 
 
 class NewRelicSenderResult(TypedDict):
+    """What a `NewRelicSender` reports back about one send attempt: whether
+    it succeeded, the HTTP status, and (on a 429) the raw `Retry-After`
+    header value, if any."""
+
     ok: bool
     status: int
     retry_after: str | None
@@ -92,6 +96,10 @@ class NewRelicTransport(BatchingTransport[LogRecord]):
         sender: NewRelicSender | None = None,
         clock: Callable[[], float] | None = None,
     ) -> None:
+        """`region` selects the US or EU ingestion endpoint. `sender`
+        defaults to a stdlib `urllib`-based POST; override for a fake in
+        tests. `clock` defaults to `time.time`; inject a fake to test the
+        429 backoff window deterministically."""
         super().__init__(formatter=formatter, max_records=max_records, max_bytes=max_bytes)
         self.license_key = license_key
         self.region = region

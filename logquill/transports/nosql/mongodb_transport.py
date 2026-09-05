@@ -8,11 +8,23 @@ from logquill.transports.batching_transport import BatchingTransport
 
 
 class MongoCollectionLike(Protocol):
-    def insert_many(self, documents: Sequence[dict[str, Any]]) -> object: ...
+    """The subset of `pymongo`'s `Collection` this transport calls —
+    implement this shape to inject a fake in tests without installing the
+    real driver."""
+
+    def insert_many(self, documents: Sequence[dict[str, Any]]) -> object:
+        """Insert a batch of documents in one call."""
+        ...
 
 
 class MongoClientLike(Protocol):
-    def close(self) -> None: ...
+    """The subset of `pymongo`'s `MongoClient` this transport calls to
+    release its connection on shutdown — implement this shape to inject a
+    fake in tests without installing the real driver."""
+
+    def close(self) -> None:
+        """Release the client's connection resources."""
+        ...
 
 
 class MongoDBTransport(BatchingTransport[LogRecord]):
@@ -34,6 +46,9 @@ class MongoDBTransport(BatchingTransport[LogRecord]):
         max_records: int = 100,
         max_bytes: int = 1_000_000,
     ) -> None:
+        """`uri`/`database`/`collection_name` are used only when this
+        transport connects its own `pymongo` client (ignored if
+        `collection` is given)."""
         super().__init__(formatter=formatter, max_records=max_records, max_bytes=max_bytes)
         self._injected = collection
         self._uri = uri
@@ -62,6 +77,9 @@ class MongoDBTransport(BatchingTransport[LogRecord]):
         return cast(MongoCollectionLike, client[self._database][self._collection_name])
 
     def close(self) -> None:
+        """Flushes any remaining buffered records, then closes the
+        self-connected client — never a client passed in as `collection`,
+        since this transport doesn't own that connection's lifecycle."""
         super().close()
         if self._injected is None and self._client is not None:
             self._client.close()

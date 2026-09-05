@@ -9,11 +9,22 @@ from logquill.transports.queue.base_queue_transport import BaseQueueTransport
 
 
 class AMQPChannelLike(Protocol):
-    def basic_publish(self, exchange: str, routing_key: str, body: bytes) -> object: ...
+    """The subset of `pika`'s channel this transport calls — implement this
+    shape to inject a fake in tests without installing the real driver."""
+
+    def basic_publish(self, exchange: str, routing_key: str, body: bytes) -> object:
+        """Publish one message to `exchange` with the given routing key."""
+        ...
 
 
 class AMQPConnectionLike(Protocol):
-    def close(self) -> None: ...
+    """The subset of `pika`'s connection this transport calls to release
+    its resources on shutdown — implement this shape to inject a fake in
+    tests without installing the real driver."""
+
+    def close(self) -> None:
+        """Close the AMQP connection."""
+        ...
 
 
 class RabbitMQTransport(BaseQueueTransport):
@@ -33,6 +44,8 @@ class RabbitMQTransport(BaseQueueTransport):
         max_records: int = 100,
         max_bytes: int = 1_000_000,
     ) -> None:
+        """`url` is used only when this transport connects its own `pika`
+        connection (ignored if `channel` is given)."""
         super().__init__(
             topic=topic, formatter=formatter, max_records=max_records, max_bytes=max_bytes
         )
@@ -63,6 +76,9 @@ class RabbitMQTransport(BaseQueueTransport):
         return cast(AMQPChannelLike, channel)
 
     def close(self) -> None:
+        """Flushes any remaining buffered records, then closes the
+        self-opened connection — never a channel passed in as `channel`,
+        since this transport doesn't own that connection's lifecycle."""
         super().close()
         if self._injected is None and self._connection is not None:
             self._connection.close()
