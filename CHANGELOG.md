@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Phase 8, CLI, complete:
+  - `logquill tail <file> [--level=] [--json] [-f/--follow] [-n/--lines]` — a
+    `logquill` console-script for tailing a JSONL log file in local dev.
+    Human-readable output by default, colorized by level to match
+    `ConsoleTransport`; `--json` prints each matching record as a raw JSON
+    line instead. `--level` filters to that level and above; `-n` limits to
+    the last N matching records; `-f`/`--follow` keeps polling the file for
+    newly appended records, for a `tail -f`-style live view. A line that
+    isn't valid JSON, or isn't a JSON object, is skipped with a warning on
+    stderr instead of aborting the whole tail.
 - Phase 7, advanced context & stdlib bridge, complete:
   - `bind_context(**values)` — a `contextvars`-based context manager that
     merges `values` into every `Logger` call underneath it, through any

@@ -31,6 +31,7 @@ for what's landed so far.
 - **Zero required runtime dependencies** — stdlib only; `aiohttp` is opt-in, for async HTTP
 - **Typed throughout** — `mypy --strict` clean on the public API
 - **Context propagation, exception capture & the stdlib bridge** — `bind_context()` (`contextvars`-based, no manual passing), `exc_info=` on any `Logger` method (formatted traceback into `meta["stack"]`), `LogQuillHandler` (bridges stdlib `logging` into a `Logger`), and `RateLimitPlugin` — see [Context propagation, exception capture & the stdlib bridge](#context-propagation-exception-capture--the-stdlib-bridge)
+- **CLI** — `logquill tail app.log --level=warn --json -f` for filtering/following a JSONL log file in local dev, no extra install — see [CLI](#cli)
 
 ## Install
 
@@ -853,6 +854,32 @@ logger = Logger("app", plugins=[RateLimitPlugin(max_records=5, per_seconds=60)])
 for _ in range(100):
     logger.error("connection refused")  # only the first 5 per minute ship
 ```
+
+## CLI
+
+Installing `logquill` also installs a `logquill` command for local
+development — no extra dependencies, since it only reads the JSONL files any
+`FileTransport`/`ConsoleTransport` already writes:
+
+```bash
+# print every record in the file, human-readable
+logquill tail app.log
+
+# only WARN and above, as raw JSON lines
+logquill tail app.log --level=warn --json
+
+# only the last 20 matching records
+logquill tail app.log -n 20
+
+# keep watching the file and print new records as they're appended, like `tail -f`
+logquill tail app.log -f
+```
+
+Human-readable output is colorized by level (matching `ConsoleTransport`'s
+colors) when writing to a terminal; pass `--no-color` to disable that, or
+`--json` to print each matching record as a single JSON line instead. A line
+that isn't valid JSON, or isn't a JSON object, is skipped with a warning on
+stderr rather than aborting the whole tail.
 
 ## Development
 

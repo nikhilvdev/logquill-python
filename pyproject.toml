@@ -72,6 +72,9 @@ hooks = [
     "pre-commit>=3.7",
 ]
 
+[project.scripts]
+logquill = "logquill.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/nikhilvdev/logquill-python"
 Repository = "https://github.com/nikhilvdev/logquill-python"
