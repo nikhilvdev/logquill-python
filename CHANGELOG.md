@@ -2,8 +2,32 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 1.0.0 - 2026-09-05
 
+- First stable release: bumped the `Development Status` classifier from
+  `3 - Alpha` to `5 - Production/Stable`, matching `1.0.0`.
+- Packaging polish:
+  - Confirmed the `py.typed` marker ships correctly inside the built wheel
+    (verified by installing that wheel into a fresh virtualenv and running
+    `mypy --strict` against a script importing the installed package, not
+    the local checkout) and that `pyproject.toml`'s keywords, project
+    URLs, and optional-dependency extras were already complete.
+  - Fixed a real sdist-packaging bug found while verifying the above: the
+    sdist was bundling whatever untracked local files happened to sit in
+    the working tree at build time — including the local `hypothesis`
+    test cache (`.hypothesis/`, 145 files) and other per-machine tool
+    state — alongside the actual source, since `hatchling`'s default
+    sdist selection includes anything not explicitly `.gitignore`d, and
+    not every local artifact was. Replaced that with an explicit
+    `[tool.hatch.build.targets.sdist]` allowlist naming exactly the
+    paths the package needs (`logquill/`, `tests/`, docs, license,
+    `pyproject.toml`), so a sdist built from any contributor's machine
+    stays limited to actual project files regardless of what else is
+    sitting in the working tree.
+  - Verified `python -m build` produces a clean wheel and sdist, `twine
+    check dist/*` passes on both, and installing the built wheel into a
+    fresh virtualenv works end to end — import, logging calls, and the
+    `logquill` CLI entry point all function against the installed package.
 - Phase 9, docs, complete:
   - Every public class and function across the package now has a docstring
     explaining what it does and why you'd reach for it — not a restatement
