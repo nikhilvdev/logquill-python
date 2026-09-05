@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "logquill"
-version = "0.5.0"
+version = "1.0.0"
 description = "A structured, leveled logging framework with pluggable transports and a plugin pipeline."
 readme = "README.md"
 license = "MIT"
@@ -21,7 +21,7 @@ keywords = [
     "plugins",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
@@ -88,6 +88,21 @@ Issues = "https://github.com/nikhilvdev/logquill-python/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["logquill"]
+
+[tool.hatch.build.targets.sdist]
+# Explicit allowlist rather than an exclude list: keeps the sdist limited
+# to what the package actually needs regardless of what local, untracked
+# tool/editor state happens to sit in the working tree at build time.
+include = [
+    "/logquill",
+    "/tests",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/CODE_OF_CONDUCT.md",
+    "/CONTRIBUTING.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]
 
 [tool.ruff]
 line-length = 100
