@@ -92,6 +92,9 @@ class CrewAIAdapter(LogQuillAdapter, BaseEventListener):  # type: ignore[misc]
     """
 
     def __init__(self, agent_log: Logger) -> None:
+        """Registers this listener's handlers on CrewAI's event bus
+        immediately (`BaseEventListener.__init__`'s own behavior) — keep a
+        reference alive for as long as you want it active."""
         LogQuillAdapter.__init__(self, agent_log)
         self._open_spans: dict[str, SpanContext] = {}
         self._call_starts: dict[str, datetime] = {}
@@ -132,6 +135,9 @@ class CrewAIAdapter(LogQuillAdapter, BaseEventListener):  # type: ignore[misc]
     # `@`-applying an `Any`-typed decorator even though the wrapped method
     # itself is fully annotated. A plain call sidesteps that check.
     def setup_listeners(self, crewai_event_bus: Any) -> None:
+        """`BaseEventListener`'s required override: subscribes every CrewAI
+        event this adapter translates (crew/task/agent/tool/LLM
+        start/end/error) to its matching handler on `crewai_event_bus`."""
         crewai_event_bus.on(CrewKickoffStartedEvent)(self._on_crew_started)
         crewai_event_bus.on(CrewKickoffCompletedEvent)(self._on_crew_completed)
         crewai_event_bus.on(CrewKickoffFailedEvent)(self._on_crew_failed)

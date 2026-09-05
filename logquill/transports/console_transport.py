@@ -30,12 +30,17 @@ class ConsoleTransport(Transport):
         stdout: TextIO | None = None,
         stderr: TextIO | None = None,
     ) -> None:
+        """`stdout`/`stderr` are injectable (defaulting to `sys.stdout`/
+        `sys.stderr`) so tests can capture output without redirecting the
+        real streams."""
         super().__init__(formatter)
         self.colorize = colorize
         self._stdout: TextIO = stdout if stdout is not None else sys.stdout
         self._stderr: TextIO = stderr if stderr is not None else sys.stderr
 
     def write(self, formatted: str, record: LogRecord) -> None:
+        """Writes `formatted` to stdout, or stderr for `ERROR`/`FATAL`,
+        colorized by level when `colorize` is set."""
         level = parse_level(record["level"])
         stream = self._stderr if level >= Level.ERROR else self._stdout
         line = self._colorize(formatted, level) if self.colorize else formatted

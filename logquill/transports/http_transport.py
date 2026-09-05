@@ -38,6 +38,8 @@ class HTTPTransport(Transport):
         batch_size: int = 50,
         sender: Sender | None = None,
     ) -> None:
+        """`sender` defaults to a stdlib `urllib`-based POST; override for a
+        fake in tests or an alternate HTTP backend."""
         super().__init__(formatter)
         self.url = url
         self.batch_size = batch_size
@@ -45,15 +47,20 @@ class HTTPTransport(Transport):
         self._batch: list[str] = []
 
     def write(self, formatted: str, record: LogRecord) -> None:
+        """Buffers `formatted` and triggers a `flush()` once `batch_size` is
+        reached."""
         self._batch.append(formatted)
         if len(self._batch) >= self.batch_size:
             self.flush()
 
     def flush(self) -> None:
+        """Sends whatever is currently buffered via `sender`, clearing the
+        buffer first. No-op if nothing is buffered."""
         if not self._batch:
             return
         batch, self._batch = self._batch, []
         self._sender(self.url, batch)
 
     def close(self) -> None:
+        """Flushes any remaining buffered records."""
         self.flush()

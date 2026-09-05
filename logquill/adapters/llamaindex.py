@@ -59,6 +59,9 @@ class _SpanLogger(SimpleSpanHandler):  # type: ignore[misc]
         result: Any = None,
         **kwargs: Any,
     ) -> Any:
+        """Logs a successfully-completed span (`.info()`, with `duration_ms`
+        and `parent_span_id` if nested) after delegating to
+        `SimpleSpanHandler` for the actual span bookkeeping."""
         span = super().prepare_to_exit_span(id_, bound_args, instance, result, **kwargs)
         self._log_close(id_, span)
         return span
@@ -71,6 +74,9 @@ class _SpanLogger(SimpleSpanHandler):  # type: ignore[misc]
         err: BaseException | None = None,
         **kwargs: Any,
     ) -> Any:
+        """Logs a span that exited via exception (`.error()`, with `err`'s
+        message) after delegating to `SimpleSpanHandler` for the actual span
+        bookkeeping."""
         span = super().prepare_to_drop_span(id_, bound_args, instance, err, **kwargs)
         self._log_close(id_, span, error=err)
         return span
@@ -101,6 +107,10 @@ class _EventLogger(BaseEventHandler):  # type: ignore[misc]
     log: Logger
 
     def handle(self, event: Any, **kwargs: Any) -> Any:
+        """`BaseEventHandler`'s required override: classifies `event` by its
+        `class_name()` suffix (`*StartEvent`/`*EndEvent`/`*ErrorEvent`) and
+        forwards it as the matching `.action()`/`.observation()`/`.error()`
+        call; a few noisy progress/delta event types are skipped entirely."""
         name = event.class_name()
         if name.endswith(_SKIPPED_SUFFIXES):
             return None
@@ -149,6 +159,9 @@ class LlamaIndexAdapter(LogQuillAdapter):
     """
 
     def __init__(self, agent_log: Logger) -> None:
+        """Registers a span handler and an event handler on LlamaIndex's
+        global instrumentation dispatcher immediately — active as soon as
+        it's constructed, no separate "start" call needed."""
         super().__init__(agent_log)
         self._span_handler = _SpanLogger(log=agent_log)
         self._event_handler = _EventLogger(log=agent_log)

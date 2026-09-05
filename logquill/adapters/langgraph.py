@@ -64,9 +64,14 @@ class LangGraphAdapter(LangChainAdapter, GraphCallbackHandler):  # type: ignore[
     """
 
     def on_interrupt(self, event: Any) -> None:
+        """Emits `.observation("graph_interrupted")` when the graph pauses on
+        an `interrupt()` call, carrying each pending interrupt's `id`/`value`
+        plus the checkpoint fields."""
         meta = _checkpoint_meta(event)
         meta["interrupts"] = [{"id": i.id, "value": i.value} for i in event.interrupts]
         self.log.observation("graph_interrupted", **meta)
 
     def on_resume(self, event: Any) -> None:
+        """Emits `.action("graph_resumed")` when the graph resumes from a
+        persisted checkpoint."""
         self.log.action("graph_resumed", **_checkpoint_meta(event))

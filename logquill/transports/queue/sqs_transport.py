@@ -11,7 +11,13 @@ _SQS_BATCH_LIMIT = 10
 
 
 class SQSClientLike(Protocol):
-    def send_message_batch(self, QueueUrl: str, Entries: Sequence[dict[str, str]]) -> object: ...  # noqa: N803
+    """The subset of `boto3`'s SQS client this transport calls — implement
+    this shape to inject a fake in tests without installing the real
+    driver."""
+
+    def send_message_batch(self, QueueUrl: str, Entries: Sequence[dict[str, str]]) -> object:  # noqa: N803
+        """Send up to 10 messages to `QueueUrl` in one call."""
+        ...
 
 
 class SQSTransport(BaseQueueTransport):
@@ -36,6 +42,8 @@ class SQSTransport(BaseQueueTransport):
         max_records: int = 100,
         max_bytes: int = 1_000_000,
     ) -> None:
+        """`region` is used only when this transport connects its own
+        `boto3` client (ignored if `client` is given)."""
         super().__init__(
             topic=topic, formatter=formatter, max_records=max_records, max_bytes=max_bytes
         )

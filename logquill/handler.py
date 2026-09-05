@@ -82,10 +82,18 @@ class LogQuillHandler(logging.Handler):
     """
 
     def __init__(self, logger: Logger, level: int = logging.NOTSET) -> None:
+        """`logger` is the LogQuill `Logger` every bridged stdlib record is
+        forwarded onto; `level` is this handler's own stdlib-level filter,
+        applied on top of `logger`'s own level."""
         super().__init__(level)
         self._logger = logger
 
     def emit(self, record: logging.LogRecord) -> None:
+        """Translates a stdlib `logging.LogRecord` into a LogQuill call:
+        maps its level, folds any `extra=` fields into `meta`, formats
+        `exc_info` if present, and routes it through the wrapped `Logger`'s
+        own `_log` path. Delegates to `self.handleError()` (never raises)
+        if translation itself fails."""
         try:
             meta: dict[str, Any] = {
                 key: value

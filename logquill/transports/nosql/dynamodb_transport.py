@@ -8,11 +8,24 @@ from logquill.transports.batching_transport import BatchingTransport
 
 
 class DynamoBatchWriterLike(Protocol):
-    def put_item(self, Item: dict[str, Any]) -> object: ...  # noqa: N803 — matches boto3's kwarg
+    """The subset of `boto3`'s DynamoDB batch-writer context this transport
+    calls — implement this shape to inject a fake in tests without
+    installing the real driver."""
+
+    def put_item(self, Item: dict[str, Any]) -> object:  # noqa: N803 — matches boto3's kwarg
+        """Queue one item for the batch write."""
+        ...
 
 
 class DynamoTableLike(Protocol):
-    def batch_writer(self) -> ContextManager[DynamoBatchWriterLike]: ...
+    """The subset of `boto3`'s DynamoDB `Table` resource this transport
+    calls — implement this shape to inject a fake in tests without
+    installing the real driver."""
+
+    def batch_writer(self) -> ContextManager[DynamoBatchWriterLike]:
+        """Open a batch-writer context that auto-chunks and auto-retries
+        queued items."""
+        ...
 
 
 def _partition_key(record: LogRecord) -> str:
@@ -64,6 +77,8 @@ class DynamoDBTransport(BatchingTransport[LogRecord]):
         max_records: int = 100,
         max_bytes: int = 1_000_000,
     ) -> None:
+        """`table_name`/`region` are used only when this transport connects
+        its own `boto3` resource (ignored if `table` is given)."""
         super().__init__(formatter=formatter, max_records=max_records, max_bytes=max_bytes)
         self._injected = table
         self._table_name = table_name

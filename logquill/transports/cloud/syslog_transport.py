@@ -57,6 +57,9 @@ class SyslogTransport(Transport):
         formatter: Formatter | None = None,
         sender: SyslogSender | None = None,
     ) -> None:
+        """`protocol` must be `"udp"` or `"tcp"`; `sender` defaults to
+        sending over a real socket, opened lazily on first use — inject a
+        fake for tests."""
         super().__init__(formatter)
         if protocol not in ("udp", "tcp"):
             raise ValueError(f"SyslogTransport: protocol must be 'udp' or 'tcp', got {protocol!r}")
@@ -89,6 +92,9 @@ class SyslogTransport(Transport):
             self._sock.sendall(data)
 
     def write(self, formatted: str, record: LogRecord) -> None:
+        """Frames `formatted` as one RFC 5424 message and sends it
+        immediately (newline-terminated for TCP, as a single datagram for
+        UDP) — never batched, unlike the HTTP-API transports."""
         severity = _SEVERITY_BY_LEVEL.get(parse_level(record["level"]), 6)
         pri = self.facility * 8 + severity
         app_name = self.app_name or record["logger"]
@@ -102,6 +108,7 @@ class SyslogTransport(Transport):
         self._resolved_sender()(data)
 
     def close(self) -> None:
+        """Closes the underlying socket, if one was opened."""
         if self._sock is not None:
             self._sock.close()
             self._sock = None

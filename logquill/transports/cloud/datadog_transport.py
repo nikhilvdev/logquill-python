@@ -46,6 +46,9 @@ class DatadogTransport(BatchingTransport[LogRecord]):
         max_bytes: int = 1_000_000,
         sender: DatadogSender | None = None,
     ) -> None:
+        """`site` picks the region-specific intake endpoint — see the class
+        docstring for valid values. `sender` defaults to a stdlib
+        `urllib`-based POST; override for a fake in tests."""
         super().__init__(formatter=formatter, max_records=max_records, max_bytes=max_bytes)
         self.api_key = api_key
         self.site = site

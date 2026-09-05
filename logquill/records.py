@@ -23,6 +23,9 @@ def utc_timestamp() -> str:
 
 
 def create_record(*, level: Level, logger: str, message: str, meta: dict[str, Any]) -> LogRecord:
+    """Build a `LogRecord` with the current UTC timestamp and the level's
+    string name (not its numeric value, per the cross-language record
+    shape)."""
     return LogRecord(
         timestamp=utc_timestamp(),
         level=level.name,

@@ -16,10 +16,14 @@ class RedactPlugin(Plugin):
         keys: Iterable[str] = DEFAULT_REDACTED_KEYS,
         replacement: str = "***",
     ) -> None:
+        """`keys` defaults to `DEFAULT_REDACTED_KEYS`; matching is
+        case-insensitive, so callers don't need to worry about casing."""
         self.keys = {key.lower() for key in keys}
         self.replacement = replacement
 
     def before_log(self, record: LogRecord) -> LogRecord | None:
+        """Replaces the value of any `meta` key matching `keys`
+        (case-insensitively) with `replacement`."""
         meta = record["meta"]
         record["meta"] = {
             key: self.replacement if key.lower() in self.keys else value

@@ -57,6 +57,10 @@ class SpanContext:
         parent_span_id: str | None = None,
         **meta: Any,
     ) -> None:
+        """`span_id` defaults to a freshly generated id; `parent_span_id`
+        overrides the auto-nesting that would otherwise come from any
+        enclosing span active in this execution context — see the class
+        docstring for why a caller would pass either explicitly."""
         self._logger = logger
         self._name = name
         self._meta = meta
@@ -66,6 +70,8 @@ class SpanContext:
         self._start = 0.0
 
     def __enter__(self) -> SpanContext:
+        """Push this span's id as the current span for this execution
+        context and start its duration timer."""
         self._token = _current_span_id.set(self._span_id)
         self._start = time.monotonic()
         return self
@@ -76,6 +82,10 @@ class SpanContext:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
+        """Pop this span off the current execution context and emit its
+        record — at `ERROR` with `meta.error` set if the block raised,
+        `INFO` otherwise. Does not suppress the exception; it still
+        propagates after this returns."""
         duration_ms = (time.monotonic() - self._start) * 1000
         assert self._token is not None
         _current_span_id.reset(self._token)

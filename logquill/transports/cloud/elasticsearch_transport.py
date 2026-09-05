@@ -46,6 +46,8 @@ class ElasticsearchTransport(BatchingTransport[LogRecord]):
         max_bytes: int = 1_000_000,
         sender: ElasticsearchSender | None = None,
     ) -> None:
+        """`sender` defaults to a stdlib `urllib`-based POST; override for a
+        fake in tests."""
         super().__init__(formatter=formatter, max_records=max_records, max_bytes=max_bytes)
         self.index = index
         self.bulk_url = f"{url.rstrip('/')}/_bulk"

@@ -10,9 +10,15 @@ from logquill.records import LogRecord
 
 
 class _Window:
+    """Tracks one open dedupe window: the first matching record, how many
+    matches have arrived since, and the timer that will flush it."""
+
     __slots__ = ("record", "count", "timer")
 
     def __init__(self, record: LogRecord, timer: threading.Timer) -> None:
+        """`record` is the first record seen for this dedupe key; `timer`
+        is the pending flush that will send a follow-up alert if `count`
+        ends up greater than 1 by the time it fires."""
         self.record = record
         self.count = 1
         self.timer = timer
@@ -59,6 +65,12 @@ class AlertingPlugin(Plugin):
         dedupe_key: Callable[[LogRecord], str] | None = None,
         max_tracked_keys: int = 500,
     ) -> None:
+        """`dedupe_key` defaults to level+logger+message; pass a custom
+        function to group differently (e.g. by `meta["trace_id"]`).
+        `max_tracked_keys` bounds how many distinct dedupe windows are open
+        at once — beyond that, a new key is dropped from tracking rather
+        than alerted on, so alerting degrades under extreme cardinality
+        instead of growing memory without bound."""
         self.threshold = parse_level(threshold)
         self.dedupe_window_seconds = dedupe_window_seconds
         self._dedupe_key = dedupe_key or self._default_dedupe_key
@@ -71,6 +83,10 @@ class AlertingPlugin(Plugin):
         return f"{record['level']}:{record['logger']}:{record['message']}"
 
     def after_log(self, record: LogRecord) -> None:
+        """Fires `send_alert` on a new background thread for the first
+        record at or above `threshold` under a given dedupe key, and starts
+        that key's dedupe window; any further match within the window just
+        increments its count instead of sending again."""
         if Level[record["level"]] < self.threshold:
             return
 

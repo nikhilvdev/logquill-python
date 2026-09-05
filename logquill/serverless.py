@@ -48,10 +48,15 @@ def with_lambda(loggers: LoggerOrLoggers, *, timeout: float | None = 5.0) -> Cal
     targets = _as_loggers(loggers)
 
     def decorator(func: F) -> F:
+        """Wraps `func`, choosing the async or sync flush path based on
+        whether `func` itself is a coroutine function."""
         if inspect.iscoroutinefunction(func):
 
             @functools.wraps(func)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                """Awaits `func`, then `flush_async`es every target logger
+                in a `finally` block so a raised exception still ships its
+                logs."""
                 try:
                     return await func(*args, **kwargs)
                 finally:
@@ -62,6 +67,8 @@ def with_lambda(loggers: LoggerOrLoggers, *, timeout: float | None = 5.0) -> Cal
 
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
+            """Calls `func`, then flushes every target logger in a `finally`
+            block so a raised exception still ships its logs."""
             try:
                 return func(*args, **kwargs)
             finally:

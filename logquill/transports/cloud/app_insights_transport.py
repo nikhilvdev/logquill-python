@@ -47,6 +47,9 @@ class AppInsightsTransport(BatchingTransport[LogRecord]):
         max_bytes: int = 1_000_000,
         sender: Sender | None = None,
     ) -> None:
+        """`instrumentation_key` is the Application Insights resource's
+        instrumentation key. `sender` defaults to a stdlib `urllib`-based
+        POST; override for a fake in tests."""
         super().__init__(formatter=formatter, max_records=max_records, max_bytes=max_bytes)
         self.instrumentation_key = instrumentation_key
         self._sender: Sender = sender or _urllib_sender

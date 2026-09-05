@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Phase 9, docs, complete:
+  - Every public class and function across the package now has a docstring
+    explaining what it does and why you'd reach for it — not a restatement
+    of its name — matching the bar already set by the existing public API.
+  - A full API reference, generated straight from those docstrings with
+    [pdoc](https://pdoc.dev) (`pip install logquill[docs]`), is published to
+    GitHub Pages and rebuilt automatically on every push to `main` via
+    `.github/workflows/docs.yml`.
+  - README: a new "Kubernetes" section explains why `ConsoleTransport`
+    (stdout/stderr, captured by the node's log agent) belongs in a
+    container instead of `FileTransport` (writes to an ephemeral
+    filesystem nothing aggregates), and how to avoid losing queued records
+    to `SIGTERM` when `async_dispatch=True` is combined with a container's
+    termination grace period.
 - Phase 8, CLI, complete:
   - `logquill tail <file> [--level=] [--json] [-f/--follow] [-n/--lines]` — a
     `logquill` console-script for tailing a JSONL log file in local dev.

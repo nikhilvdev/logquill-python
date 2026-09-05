@@ -32,6 +32,8 @@ def set_traceparent(value: str | None) -> Token[str | None]:
 
 
 def reset_traceparent(token: Token[str | None]) -> None:
+    """Restore the trace header context to what it was before the matching
+    `set_traceparent` call, using the token that call returned."""
     _current_traceparent.reset(token)
 
 
@@ -90,10 +92,15 @@ class TraceContextPlugin(Plugin):
     """
 
     def __init__(self, *, trace_key: str = "trace_id", traceparent: str | None = None) -> None:
+        """`traceparent`, if given, takes priority over whatever
+        `set_traceparent()` set for the current context — see the class
+        docstring's resolution order."""
         self.trace_key = trace_key
         self._explicit_traceparent = traceparent
 
     def before_log(self, record: LogRecord) -> LogRecord | None:
+        """Stamps `meta[trace_key]` if not already set, resolving a trace id
+        per the class docstring's priority order."""
         meta = record["meta"]
         if meta.get(self.trace_key) is not None:
             return record

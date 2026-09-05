@@ -71,6 +71,11 @@ hooks = [
     # CI matrix still tests 3.8, and pre-commit is only needed locally.
     "pre-commit>=3.7",
 ]
+docs = [
+    # Renders the API reference published to GitHub Pages; not needed to
+    # use or develop logquill itself.
+    "pdoc>=16",
+]
 
 [project.scripts]
 logquill = "logquill.cli:main"

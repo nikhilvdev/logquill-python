@@ -17,7 +17,13 @@ _SEVERITY = {
 
 
 class CloudLoggingClientLike(Protocol):
-    def log_struct(self, info: dict[str, Any], severity: str) -> None: ...
+    """The subset of `google-cloud-logging`'s `Logger` client this transport
+    calls — implement this shape to inject a fake in tests without
+    installing the real driver."""
+
+    def log_struct(self, info: dict[str, Any], severity: str) -> None:
+        """Write one structured log entry at the given severity."""
+        ...
 
 
 class CloudLoggingTransport(BatchingTransport[LogRecord]):
@@ -38,6 +44,8 @@ class CloudLoggingTransport(BatchingTransport[LogRecord]):
         max_records: int = 100,
         max_bytes: int = 1_000_000,
     ) -> None:
+        """`log_name` names the Cloud Logging log this transport writes to
+        when it connects its own client (ignored if `client` is given)."""
         super().__init__(formatter=formatter, max_records=max_records, max_bytes=max_bytes)
         self._log_name = log_name
         self._injected = client

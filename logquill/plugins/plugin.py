@@ -37,7 +37,10 @@ class FunctionPlugin(Plugin):
     """
 
     def __init__(self, func: MiddlewareFunc) -> None:
+        """`func` is the plain `before_log`-style function this instance
+        delegates to."""
         self._func = func
 
     def before_log(self, record: LogRecord) -> LogRecord | None:
+        """Delegates to the wrapped function."""
         return self._func(record)

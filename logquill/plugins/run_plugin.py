@@ -27,10 +27,14 @@ class RunPlugin(Plugin):
     """
 
     def __init__(self, run_id: str | None = None) -> None:
+        """`run_id` defaults to a freshly generated UUID hex string; pass an
+        explicit one to adopt an id handed in from elsewhere."""
         self.run_id = run_id or uuid.uuid4().hex
         self._step = 0
 
     def before_log(self, record: LogRecord) -> LogRecord | None:
+        """Stamps `meta.run_id` (if not already set) and this instance's
+        current step counter, then increments the counter."""
         meta = record["meta"]
         meta.setdefault("run_id", self.run_id)
         meta["step"] = self._step

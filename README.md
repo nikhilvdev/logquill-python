@@ -781,6 +781,33 @@ the same decorator under a name that reads naturally at each platform's own
 handler definition — the flush-before-return behavior is identical across
 all three.
 
+### Kubernetes
+
+Default to `ConsoleTransport`, not `FileTransport`, for anything running in a
+container. A container's filesystem is ephemeral and invisible to the rest of
+the cluster — a log file written inside it disappears the moment the pod is
+rescheduled, and nothing aggregates it in the meantime unless you also run a
+sidecar to tail it back out. Writing to stdout/stderr instead costs nothing
+extra: every major container runtime already captures both streams, and the
+node-level log agent your cluster runs (Fluentd, Fluent Bit, Vector, or your
+cloud provider's own) ships them to your aggregator without any code on your
+side that needs to know that agent exists:
+
+```python
+from logquill import ConsoleTransport, Logger
+
+logger = Logger("app", transports=[ConsoleTransport()])
+```
+
+If you do reach for `async_dispatch=True` in a container, make sure
+`logger.close()` (or `logger.flush()`) runs before the container actually
+stops — Kubernetes sends `SIGTERM` and then kills the process after
+`terminationGracePeriodSeconds` (30s by default) regardless of whether it's
+finished shutting down, so a queued-but-undispatched record can be lost if
+nothing catches the signal. A `SIGTERM` handler or `preStop` hook that calls
+`logger.close(timeout=...)` closes that gap the same way `with_lambda` closes
+it for a serverless freeze.
+
 ## Context propagation, exception capture & the stdlib bridge
 
 `bind_context()` binds request-scoped values for a `with` block — every
@@ -880,6 +907,19 @@ colors) when writing to a terminal; pass `--no-color` to disable that, or
 `--json` to print each matching record as a single JSON line instead. A line
 that isn't valid JSON, or isn't a JSON object, is skipped with a warning on
 stderr rather than aborting the whole tail.
+
+## API reference
+
+Every public class and function is documented with a docstring; the full
+reference, generated from those docstrings with [pdoc](https://pdoc.dev), is
+published at
+[nikhilvdev.github.io/logquill-python](https://nikhilvdev.github.io/logquill-python/)
+and rebuilt on every push to `main`. To build it locally:
+
+```bash
+pip install -e ".[docs]"
+pdoc --docformat google logquill  # opens a local server; add -o DIR to write static HTML instead
+```
 
 ## Development
 
