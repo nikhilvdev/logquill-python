@@ -68,7 +68,7 @@ class AsyncWorker:
         self._pending = 0
         self._closed = False
         self._cond = threading.Condition()
-        self._last_drop_warning = 0.0
+        self._last_drop_warning: float | None = None
         self._thread = threading.Thread(target=self._run, name="logquill-worker", daemon=True)
         self._thread.start()
 
@@ -105,7 +105,11 @@ class AsyncWorker:
 
     def _warn_dropping(self) -> None:
         now = time.monotonic()
-        if now - self._last_drop_warning >= _DROP_WARNING_INTERVAL_SECONDS:
+        # `None` rather than 0.0: the monotonic clock's zero point is arbitrary
+        # (often boot time), so a fresh process could otherwise be inside the
+        # warning interval already and never warn about its first drops
+        last = self._last_drop_warning
+        if last is None or now - last >= _DROP_WARNING_INTERVAL_SECONDS:
             self._last_drop_warning = now
             _logger.warning(
                 "AsyncWorker: queue full at max_queue_size=%d, dropping records "

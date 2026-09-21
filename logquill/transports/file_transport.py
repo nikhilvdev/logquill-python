@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, BinaryIO, TextIO, cast
 
-from logquill.formatter import Formatter
+from logquill.formatters import Formatter
 from logquill.records import LogRecord
 from logquill.transports.transport import Transport
 

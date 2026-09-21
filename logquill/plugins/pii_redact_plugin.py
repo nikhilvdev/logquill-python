@@ -125,3 +125,9 @@ class PIIRedactPlugin(Plugin):
         )
         anonymized = self._anonymizer.anonymize(text=text, analyzer_results=results)
         return str(anonymized.text)
+
+    def redact_local(self, name: str, text: str) -> str:
+        """Scrubs PII-shaped substrings out of the `repr` of a local variable
+        captured by `diagnose=True`, the same way `before_log` scrubs `meta`
+        values."""
+        return self._redact_text(text)

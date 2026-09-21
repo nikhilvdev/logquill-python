@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from logquill.formatters import Formatter, JSONFormatter, LogfmtFormatter, TextFormatter
 from logquill.logger import Logger
 from logquill.plugins.context_plugin import ContextPlugin
 from logquill.plugins.pii_redact_plugin import PIIRedactPlugin
@@ -44,6 +45,15 @@ _PLUGIN_TYPES: dict[str, type[Plugin]] = {
 }
 
 
+#: Built-in formatters selectable by name in a transport's `options`
+#: (`{"formatter": "logfmt"}`), since a config file can't hold an instance.
+_FORMATTER_TYPES: dict[str, type[Formatter]] = {
+    "json": JSONFormatter,
+    "text": TextFormatter,
+    "logfmt": LogfmtFormatter,
+}
+
+
 def _resolve_class(entry: dict[str, Any], registry: dict[str, type]) -> type:
     if "class" in entry:
         dotted = entry["class"]
@@ -76,8 +86,21 @@ def _build(entries: list[dict[str, Any]] | None, registry: dict[str, type]) -> l
     built = []
     for entry in entries or []:
         cls = _resolve_class(entry, registry)
-        built.append(cls(**entry.get("options", {})))
+        built.append(cls(**_resolve_options(entry.get("options", {}))))
     return built
+
+
+def _resolve_options(options: dict[str, Any]) -> dict[str, Any]:
+    formatter = options.get("formatter")
+    if not isinstance(formatter, str):
+        return options
+    try:
+        return {**options, "formatter": _FORMATTER_TYPES[formatter]()}
+    except KeyError:
+        known = ", ".join(sorted(_FORMATTER_TYPES))
+        raise ValueError(
+            f"Unknown formatter {formatter!r} — built-in formatters are: {known}."
+        ) from None
 
 
 def load_config(data: dict[str, Any], *, name: str = "app") -> Logger:
@@ -99,8 +122,13 @@ def load_config(data: dict[str, Any], *, name: str = "app") -> Logger:
           ],
           "async_dispatch": true,
           "max_queue_size": 10000,
-          "backpressure": "drop_oldest"
+          "backpressure": "drop_oldest",
+          "flush_at_exit": true
         }
+
+    A transport's `options` may name a built-in formatter as a string —
+    `{"type": "console", "options": {"formatter": "text"}}` — one of
+    `"json"` (the default), `"text"` or `"logfmt"`.
 
     Each transport/plugin entry needs either `"type"` (a built-in shortcut —
     see the module-level registries above) or `"class"` (a fully-qualified
@@ -109,7 +137,7 @@ def load_config(data: dict[str, Any], *, name: str = "app") -> Logger:
     this with config you trust, the same as any other deployment config).
     `"options"` becomes that class's constructor keyword arguments.
 
-    `"async_dispatch"`/`"max_queue_size"`/`"backpressure"` are optional and
+    `"async_dispatch"`/`"max_queue_size"`/`"backpressure"`/`"flush_at_exit"` are optional and
     map directly onto `Logger`'s constructor arguments of the same name —
     see there for what each does.
     """
@@ -125,6 +153,7 @@ def load_config(data: dict[str, Any], *, name: str = "app") -> Logger:
         async_dispatch=data.get("async_dispatch", False),
         max_queue_size=data.get("max_queue_size", 10_000),
         backpressure=data.get("backpressure", "drop_oldest"),
+        flush_at_exit=data.get("flush_at_exit", True),
     )
 
 

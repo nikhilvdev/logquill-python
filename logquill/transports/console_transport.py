@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from typing import TextIO
 
-from logquill.formatter import Formatter
+from logquill.formatters import Formatter
 from logquill.levels import Level, parse_level
 from logquill.records import LogRecord
 from logquill.transports.transport import Transport

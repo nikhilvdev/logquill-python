@@ -1,33 +1,47 @@
 from __future__ import annotations
 
+import logging
 import urllib.request
-from typing import Callable, Sequence
+from typing import Callable, Literal, Sequence
 
-from logquill.formatter import Formatter
+from logquill.formatters import Formatter
 from logquill.records import LogRecord
 from logquill.transports.transport import Transport
 
 Sender = Callable[[str, Sequence[str]], None]
 
+_logger = logging.getLogger("logquill")
 
-def _urllib_sender(url: str, batch: Sequence[str]) -> None:
-    body = "\n".join(batch).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=body,
-        headers={"Content-Type": "application/x-ndjson"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
-        response.read()
+
+def _urllib_sender(timeout: float) -> Sender:
+    def send(url: str, batch: Sequence[str]) -> None:
+        body = "\n".join(batch).encode("utf-8")
+        request = urllib.request.Request(
+            url,
+            data=body,
+            headers={"Content-Type": "application/x-ndjson"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+            response.read()
+
+    return send
 
 
 class HTTPTransport(Transport):
     """Batches formatted records and POSTs them as newline-delimited JSON.
 
-    Uses `urllib` (stdlib) by default so the core package stays dependency-free.
-    Pass `sender` to swap in a fake for tests, or a different backend (e.g. an
-    aiohttp-based one, once a non-blocking async dispatch path exists).
+    Uses `urllib` (stdlib) by default so the core package stays
+    dependency-free. `backend="aiohttp"` (`pip install logquill[http]`) sends
+    over a reused keep-alive connection instead — see `AiohttpSender`. Pass
+    `sender` to swap in a fake for tests, or any other backend.
+
+    The buffer is bounded by both `batch_size` records and `max_bytes` of
+    formatted text — a flush fires as soon as either is reached — so a few
+    huge records can't grow it without limit. A failed send is logged and
+    that batch is dropped, never raised into the code that logged; the
+    transport keeps accepting records, so a down endpoint costs completeness,
+    not the process.
     """
 
     def __init__(
@@ -36,31 +50,66 @@ class HTTPTransport(Transport):
         *,
         formatter: Formatter | None = None,
         batch_size: int = 50,
+        max_bytes: int = 1_000_000,
+        timeout: float = 10.0,
+        backend: Literal["urllib", "aiohttp"] = "urllib",
         sender: Sender | None = None,
     ) -> None:
-        """`sender` defaults to a stdlib `urllib`-based POST; override for a
-        fake in tests or an alternate HTTP backend."""
+        """`sender` overrides `backend` when given. `timeout` (seconds) bounds
+        each request for the built-in backends; it's ignored when you pass
+        your own `sender`. Raises `ValueError` for an unknown `backend`, and
+        `ImportError` for `backend="aiohttp"` without `aiohttp` installed."""
         super().__init__(formatter)
         self.url = url
         self.batch_size = batch_size
-        self._sender: Sender = sender or _urllib_sender
+        self.max_bytes = max_bytes
+        self._sender: Sender
+        if sender is not None:
+            self._sender = sender
+        elif backend == "urllib":
+            self._sender = _urllib_sender(timeout)
+        elif backend == "aiohttp":
+            from logquill.transports.aiohttp_sender import AiohttpSender
+
+            self._sender = AiohttpSender(timeout=timeout)
+        else:
+            raise ValueError(
+                f"HTTPTransport: backend must be 'urllib' or 'aiohttp', got {backend!r}"
+            )
         self._batch: list[str] = []
+        self._batch_bytes = 0
 
     def write(self, formatted: str, record: LogRecord) -> None:
-        """Buffers `formatted` and triggers a `flush()` once `batch_size` is
-        reached."""
+        """Buffers `formatted` and triggers a `flush()` once `batch_size`
+        records or `max_bytes` bytes are buffered."""
         self._batch.append(formatted)
-        if len(self._batch) >= self.batch_size:
+        self._batch_bytes += len(formatted.encode("utf-8", errors="replace"))
+        if len(self._batch) >= self.batch_size or self._batch_bytes >= self.max_bytes:
             self.flush()
 
     def flush(self) -> None:
-        """Sends whatever is currently buffered via `sender`, clearing the
-        buffer first. No-op if nothing is buffered."""
+        """Sends whatever is currently buffered via the sender, clearing the
+        buffer first. No-op if nothing is buffered. A failed send is logged,
+        not raised."""
         if not self._batch:
             return
         batch, self._batch = self._batch, []
-        self._sender(self.url, batch)
+        self._batch_bytes = 0
+        try:
+            self._sender(self.url, batch)
+        except Exception:
+            _logger.exception(
+                "HTTPTransport: couldn't deliver %d log record(s) to %s — check the URL "
+                "is reachable and accepts POSTed NDJSON, or raise `timeout`; "
+                "those records were dropped",
+                len(batch),
+                self.url,
+            )
 
     def close(self) -> None:
-        """Flushes any remaining buffered records."""
+        """Flushes any remaining buffered records and releases the backend's
+        connection, if it holds one."""
         self.flush()
+        closer = getattr(self._sender, "close", None)
+        if callable(closer):
+            closer()

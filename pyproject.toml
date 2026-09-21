@@ -39,6 +39,7 @@ dependencies = []
 
 [project.optional-dependencies]
 http = ["aiohttp>=3.9"]
+apprise = ["apprise>=1.8"]
 postgres = ["psycopg2-binary>=2.9"]
 mysql = ["pymysql>=1.1"]
 mongodb = ["pymongo>=4.6"]
@@ -96,6 +97,7 @@ packages = ["logquill"]
 include = [
     "/logquill",
     "/tests",
+    "/benchmarks",
     "/README.md",
     "/CHANGELOG.md",
     "/CODE_OF_CONDUCT.md",
@@ -127,6 +129,13 @@ files = ["logquill"]
 [[tool.mypy.overrides]]
 module = "logquill.transports.file_transport"
 warn_unused_ignores = false
+
+# `apprise` and `aiohttp` are optional dependencies that a bare type-check
+# environment (the pre-commit hook) doesn't install, so their imports have to
+# resolve the same way whether or not they're present.
+[[tool.mypy.overrides]]
+module = ["apprise", "aiohttp"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

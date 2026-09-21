@@ -25,6 +25,16 @@ class Plugin:
     def on_error(self, exc: Exception, record: LogRecord) -> None:
         """Called when one of this plugin's own hooks raises."""
 
+    def redact_local(self, name: str, text: str) -> str:
+        """Optional hook for redaction plugins: called with the name and
+        `repr` of each local variable that `diagnose=True` captures into a
+        traceback, before the traceback is formatted, and returns the text to
+        show instead. Defaults to returning `text` unchanged. Only override
+        this if your plugin masks sensitive values — see `RedactPlugin`. If
+        it raises, the value is replaced with a placeholder rather than shown.
+        """
+        return text
+
 
 class FunctionPlugin(Plugin):
     """Wraps a plain `before_log`-style function as a `Plugin`.

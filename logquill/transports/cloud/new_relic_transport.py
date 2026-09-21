@@ -9,7 +9,7 @@ import urllib.request
 from email.utils import parsedate_to_datetime
 from typing import Callable, Dict, Literal, Sequence, TypedDict
 
-from logquill.formatter import Formatter
+from logquill.formatters import Formatter
 from logquill.records import LogRecord
 from logquill.transports.batching_transport import BatchingTransport
 

@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import IO, Any, Sequence
 
+from logquill.formatters import format_text
 from logquill.levels import Level, parse_level
 
 _COLORS = {
@@ -93,20 +94,11 @@ def _parse_line(line: str, *, warn_stream: IO[str]) -> dict[str, Any] | None:
 
 
 def _format_human(record: dict[str, Any], *, colorize: bool) -> str:
-    level_name = str(record.get("level", "?"))
-    timestamp = record.get("timestamp", "?")
-    logger_name = record.get("logger", "?")
-    message = record.get("message", "")
-    meta = record.get("meta") or {}
-
-    line = f"{timestamp} {level_name:<5} {logger_name}: {message}"
-    if meta:
-        line += f" {json.dumps(meta, separators=(',', ':'), default=str)}"
-
+    line = format_text(record)
     if colorize:
         try:
-            color = _COLORS.get(parse_level(level_name))
-        except (TypeError, ValueError):
+            color = _COLORS.get(parse_level(str(record.get("level", "?"))))
+        except ValueError:
             color = None
         if color:
             line = f"{color}{line}{_RESET}"

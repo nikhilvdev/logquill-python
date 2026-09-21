@@ -4,7 +4,7 @@ import os
 import socket
 from typing import Callable
 
-from logquill.formatter import Formatter
+from logquill.formatters import Formatter
 from logquill.levels import Level, parse_level
 from logquill.records import LogRecord
 from logquill.transports.transport import Transport

@@ -23,14 +23,16 @@ for what's landed so far.
 - **Structured by default** — every call carries a `meta` dict, not just a message string
 - **Cross-language record shape** — identical JSON shape and level names/weights as [`logquill` on npm](https://www.npmjs.com/package/logquill)
 - **Pluggable transports** — `ConsoleTransport` (colorized, stderr for errors), `FileTransport` (rotation, optional encryption-at-rest), `HTTPTransport` (batched), `SyslogTransport` (RFC 5424, UDP/TCP), plus SQL/NoSQL/message-queue/cloud-native sinks (see [Transports](#transports)); write your own by subclassing `Transport`
-- **Pluggable formatters** — `JSONFormatter` out of the box; implement `format(record) -> str` for your own
+- **Pluggable formatters** — `JSONFormatter` (default, machine-readable), `TextFormatter` (human-readable, for terminals), and `LogfmtFormatter` (`key=value`, the Heroku/Go convention); implement `format(record) -> str` for your own — see [Formatters](#formatters)
 - **Config from file/env** — `load_config(dict)`, `logger_from_file(path)` (JSON/YAML), `logger_from_env()` build a `Logger` from one config shape — see [Config](#config)
 - **Plugin pipeline** — `ContextPlugin`, `RedactPlugin` (by key), `PIIRedactPlugin` (by pattern), `SamplingPlugin` (with tail-based elevation), `TamperEvidentPlugin` (hash-chained logs), `TraceContextPlugin` (cross-service trace correlation), and `AlertingPlugin` (`SlackAlertPlugin`/`PagerDutyAlertPlugin`/`EmailAlertPlugin`, deduplicated) out of the box; a broken plugin can't crash logging; `.use()` also accepts a plain function, no subclassing required (see [Plugins](#plugins))
 - **Agentic & harness tracing** — `.child()` loggers, `RunPlugin`, `.thought()/.action()/.observation()/.decision()`, `with agent_log.span(...)`, and framework adapters — `LangChainAdapter` (`pip install logquill[langchain]`), `LangGraphAdapter` (`pip install logquill[langgraph]`, adds checkpoint interrupt/resume events on top), `CrewAIAdapter` (`pip install logquill[crewai]`), `LlamaIndexAdapter` (`pip install logquill[llamaindex]`), and `AutoGenAdapter` (`pip install logquill[autogen]`) — see [Agentic & harness tracing](#agentic--harness-tracing)
 - **Non-blocking async dispatch** — `Logger(async_dispatch=True)` moves transport writes onto a background thread with a bounded queue and a configurable backpressure policy (`drop_oldest`/`drop_newest`/`block`); `flush()`/`flush_async()` and a `with_lambda`/`with_cloud_function`/`with_azure_function` decorator make serverless shutdown safe — see [Async dispatch & serverless safety](#async-dispatch--serverless-safety)
-- **Zero required runtime dependencies** — stdlib only; `aiohttp` is opt-in, for async HTTP
+- **Zero required runtime dependencies** — stdlib only; `aiohttp` (`logquill[http]`) is opt-in, for keep-alive HTTP delivery
 - **Typed throughout** — `mypy --strict` clean on the public API
 - **Context propagation, exception capture & the stdlib bridge** — `bind_context()` (`contextvars`-based, no manual passing), `exc_info=` on any `Logger` method (formatted traceback into `meta["stack"]`), `LogQuillHandler` (bridges stdlib `logging` into a `Logger`), and `RateLimitPlugin` — see [Context propagation, exception capture & the stdlib bridge](#context-propagation-exception-capture--the-stdlib-bridge)
+- **Cheap when idle, precise when it counts** — `logger.opt(lazy=True)` defers expensive `meta` values until a record will really be emitted, `logger.opt(depth=N)` reports the right caller from inside a wrapper, `logquill.disable(__name__)` silences a library's own logs by default, and queued records are flushed automatically at interpreter exit — see [Lazy values, caller depth & disabling a library](#lazy-values-caller-depth--disabling-a-library)
+- **Parse any log file** — `parse()` pulls structured fields out of a log file (LogQuill's own or a legacy format) with a regex, streaming line by line — see [Parsing log files](#parsing-log-files)
 - **CLI** — `logquill tail app.log --level=warn --json -f` for filtering/following a JSONL log file in local dev, no extra install — see [CLI](#cli)
 
 ## Install
@@ -126,8 +128,9 @@ logger = load_config({
 ## Transports
 
 Attach transports to a `Logger` to actually write records somewhere. Each
-record is dispatched to every attached transport synchronously (non-blocking
-dispatch isn't implemented yet):
+record is dispatched to every attached transport synchronously by default;
+pass `async_dispatch=True` to move that onto a background thread (see
+[Async dispatch & serverless safety](#async-dispatch--serverless-safety)):
 
 ```python
 from logquill import ConsoleTransport, FileTransport, HTTPTransport, Logger
@@ -159,6 +162,63 @@ logger = Logger("app.test", transports=[sink])
 logger.info("hello")
 assert sink.records[0]["message"] == "hello"
 ```
+
+`HTTPTransport` sends with stdlib `urllib` by default. `backend="aiohttp"`
+(`pip install logquill[http]`) sends over one reused keep-alive connection
+instead, which saves a TCP/TLS handshake per batch against an HTTPS collector:
+
+```python
+from logquill import HTTPTransport
+
+transport = HTTPTransport("https://logs.example.com/ingest", backend="aiohttp", timeout=5.0)
+transport.close()  # sends anything buffered and closes the connection
+```
+
+Its buffer is bounded by both `batch_size` records and `max_bytes` of
+formatted text, and a failed send is logged (naming the URL) and that batch
+dropped — it never raises into the code that logged.
+
+### Formatters
+
+A transport renders each record with its `formatter`. `JSONFormatter` is the
+default and the right choice for anything a machine reads. Two more ship for
+other readers:
+
+- `TextFormatter` — one human-readable entry per record, with any traceback
+  printed on the lines below it. For terminals and local development.
+- `LogfmtFormatter` — a single `key=value` line, the Heroku/Go convention,
+  for tools (Loki, Splunk, `grep`) that expect it. Nested `meta` flattens to
+  dotted keys, and a value with spaces or newlines is quoted, so a record is
+  always exactly one line.
+
+```python
+import io
+
+from logquill import ConsoleTransport, LogfmtFormatter, Logger, TextFormatter, parse_logfmt
+
+text_out, logfmt_out = io.StringIO(), io.StringIO()
+logger = Logger(
+    "app.api",
+    transports=[
+        ConsoleTransport(formatter=TextFormatter(), colorize=False, stdout=text_out),
+        ConsoleTransport(formatter=LogfmtFormatter(), colorize=False, stdout=logfmt_out),
+    ],
+)
+
+logger.info("user signed up", user_id=42, http={"status": 201}, note="from the web form")
+
+assert 'app.api: user signed up {"user_id":42,' in text_out.getvalue()
+
+fields = parse_logfmt(logfmt_out.getvalue())
+assert fields["level"] == "INFO"
+assert fields["user_id"] == "42"
+assert fields["http.status"] == "201"
+assert fields["note"] == "from the web form"
+```
+
+In a config file, name the formatter as a string in the transport's
+`options`: `{"type": "console", "options": {"formatter": "text"}}` (`"json"`,
+`"text"` or `"logfmt"`). To write your own, implement `format(record) -> str`.
 
 ### SQL, NoSQL, message queue, and cloud-native transports
 
@@ -491,6 +551,27 @@ Write your own destination by subclassing `AlertingPlugin` and implementing
 `send_alert(record, occurrences)`; thresholding, deduplication, and the
 never-block-the-caller behavior are all handled by the base class.
 
+`AppriseAlertPlugin` reaches everything else. It hands the alert to
+[Apprise](https://github.com/caronc/apprise) (`pip install logquill[apprise]`),
+which speaks to 100+ services — Discord, Telegram, Microsoft Teams, ntfy,
+Matrix, SMS gateways — from one URL each, so you don't need a plugin per
+service. It has the same background-thread sending, deduplication and
+failure handling as the other alerting plugins. Prefer `SlackAlertPlugin` or
+`PagerDutyAlertPlugin` for those two, which format richer messages than
+Apprise's generic title-and-body allows:
+
+```python
+from logquill import AppriseAlertPlugin, Logger
+
+logger = Logger(
+    "app",
+    plugins=[AppriseAlertPlugin(["discord://webhook_id/webhook_token", "ntfy://my-topic"])],
+)
+```
+
+A URL Apprise doesn't recognize raises `ValueError` right away, at startup,
+instead of silently failing on the first real alert.
+
 ## Agentic & harness tracing
 
 `.child()` makes a namespaced logger that shares the parent's transports —
@@ -741,6 +822,16 @@ closes every transport:
 logger.close(timeout=5.0)
 ```
 
+If a script ends without calling `close()`, LogQuill does it for you: by
+default every `Logger` registers an `atexit` hook that drains the queue
+(waiting up to 5 seconds) and closes its transports once, so the last records
+and a batching transport's unsent batch aren't lost. Pass
+`flush_at_exit=False` (or `"flush_at_exit": false` in a config file) if you'd
+rather manage shutdown yourself. `atexit` only runs on a normal exit — end of
+script, `sys.exit()`, an unhandled exception — not when the process is killed
+outright (`SIGKILL`, `os._exit()`, or `SIGTERM` with no handler), which is
+why the Kubernetes note below still applies.
+
 For code that keeps running afterward (a request handler, a serverless
 invocation), use `logger.flush()` instead — it drains the queue and flushes
 each transport's own internal buffer (see `BatchingTransport`) *without*
@@ -853,6 +944,62 @@ assert record["meta"]["order_id"] == 42
 assert "ZeroDivisionError" in record["meta"]["stack"]
 ```
 
+### Local variables in tracebacks: `diagnose`
+
+`diagnose=True` adds each frame's local variable values under its source line,
+which turns "it failed in `charge()`" into "it failed because `amount` was
+`0`":
+
+```python
+from logquill import Logger
+
+logger = Logger("app")
+
+
+def charge(amount):
+    fee = 2.5
+    return fee / amount
+
+
+try:
+    charge(0)
+except ZeroDivisionError:
+    record = logger.error("payment failed", diagnose=True)  # implies exc_info=True
+
+assert "amount = 0" in record["meta"]["stack"]
+assert "fee = 2.5" in record["meta"]["stack"]
+```
+
+**It's off by default, and it can leak sensitive data.** Whatever a local
+variable holds — a password, a token, a whole request body — is written into
+the log. Keep it off in production. If you do turn it on there, register
+`RedactPlugin` and/or `PIIRedactPlugin`: every captured value is passed
+through them *before* the traceback is formatted, so a local named `password`
+or holding an email address is masked instead of printed. They only mask what
+they're configured to recognize (a local's name, or a PII pattern in its
+value) — a secret hiding inside a dict called `payload` is not caught. A
+plugin whose redaction hook fails masks the value rather than showing it.
+
+```python
+from logquill import Logger, RedactPlugin
+
+logger = Logger("app", plugins=[RedactPlugin()])
+
+
+def login(user, password):
+    raise PermissionError("bad credentials")
+
+
+try:
+    login("ada", "hunter2")
+except PermissionError:
+    record = logger.error("login failed", diagnose=True)
+
+assert "user = 'ada'" in record["meta"]["stack"]
+assert "hunter2" not in record["meta"]["stack"]
+assert "password = ***" in record["meta"]["stack"]
+```
+
 `LogQuillHandler` bridges stdlib `logging` calls — including from
 third-party libraries you don't control — into a `Logger`, so they flow
 through the same transports and plugins instead of needing every call site
@@ -881,6 +1028,110 @@ logger = Logger("app", plugins=[RateLimitPlugin(max_records=5, per_seconds=60)])
 for _ in range(100):
     logger.error("connection refused")  # only the first 5 per minute ship
 ```
+
+## Lazy values, caller depth & disabling a library
+
+**Lazy values.** A `DEBUG`/`TRACE` call left in production code still builds
+its arguments before the logger discards it. `logger.opt(lazy=True)` defers
+any callable `meta` value until the record is really going to be emitted, so
+a filtered call costs nothing. (If a callable raises, the record carries a
+placeholder naming the error; the exception never reaches your code.)
+
+```python
+from logquill import Logger
+
+logger = Logger("app", level="INFO")
+calls = []
+
+
+def expensive_dump():
+    calls.append(1)
+    return {"rows": 100_000}
+
+
+logger.opt(lazy=True).debug("state", dump=expensive_dump)  # filtered: never called
+assert calls == []
+
+record = logger.opt(lazy=True).info("state", dump=expensive_dump)  # emitted: called once
+assert calls == [1]
+assert record["meta"]["dump"] == {"rows": 100_000}
+```
+
+**Caller depth.** `logger.opt(depth=N)` adds `meta.caller` (`module`,
+`function`, `line`, `file`) naming the code that logged, `N` frames up from the
+direct caller. Use it in a wrapper or decorator so the record points at the
+wrapper's caller instead of the wrapper itself:
+
+```python
+from logquill import Logger
+
+logger = Logger("app")
+
+
+def audit(message):
+    return logger.opt(depth=1).info(message)  # report audit()'s caller, not audit()
+
+
+def transfer_funds():
+    return audit("funds transferred")
+
+
+record = transfer_funds()
+assert record["meta"]["caller"]["function"] == "transfer_funds"
+```
+
+**Disabling a library.** When a library uses LogQuill internally, it should
+be silent in its host application by default. The library calls
+`logquill.disable(__name__)` once at import; the application can opt back in
+with `enable()`. Rules cover a logger and everything nested under it, and the
+most specific rule wins:
+
+```python
+import logquill
+from logquill import Logger
+
+library_log = Logger("mylib.http")  # what a library `mylib` would create
+
+logquill.disable("mylib")
+assert library_log.info("hidden") is None
+
+logquill.enable("mylib.http")  # the app wants just this part back
+assert library_log.info("visible") is not None
+```
+
+## Parsing log files
+
+`parse()` extracts structured fields from a log file with a regex — including
+logs LogQuill didn't write, like a legacy app's or a third-party tool's. It
+yields a dict of the pattern's named groups for every matching line and skips
+the rest. It reads one line at a time, so a multi-gigabyte file costs no more
+memory than a small one. `cast` converts groups as they're read:
+
+```python
+import tempfile
+from pathlib import Path
+
+from logquill import parse
+
+with tempfile.TemporaryDirectory() as directory:
+    path = Path(directory) / "legacy.log"
+    path.write_text(
+        "2026-01-01 10:00:00 [INFO] 200 started\n"
+        "not a log line\n"
+        "2026-01-01 10:00:05 [ERROR] 503 upstream down\n"
+    )
+
+    pattern = r"(?P<when>\S+ \S+) \[(?P<level>[A-Z]+)\] (?P<code>\d+) (?P<message>.*)"
+    errors = [e for e in parse(path, pattern, cast={"code": int}) if e["level"] == "ERROR"]
+
+assert errors == [
+    {"when": "2026-01-01 10:00:05", "level": "ERROR", "code": 503, "message": "upstream down"}
+]
+```
+
+To read back what `TextFormatter` wrote, use the ready-made
+`TEXT_LOG_PATTERN` with `cast=TEXT_LOG_CASTS` (which decodes `meta` from JSON);
+for `LogfmtFormatter` output, `parse_logfmt(line)` returns a dict of strings.
 
 ## CLI
 

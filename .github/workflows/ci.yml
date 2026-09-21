@@ -20,10 +20,27 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - run: pip install -e ".[dev,http]"
+      - run: pip install -e ".[dev,http,apprise]"
 
       - run: ruff check .
 
       - run: mypy logquill
 
       - run: pytest --cov
+
+  # Memory budgets for the logging hot path (see benchmarks/measure.py). Kept
+  # out of the matrix above and away from coverage: line tracing inflates
+  # allocation counts, and the budgets only need one interpreter to gate on.
+  benchmarks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - run: pip install -e ".[dev]"
+
+      - run: pytest benchmarks

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol, Sequence, cast
 
-from logquill.formatter import Formatter
+from logquill.formatters import Formatter
 from logquill.transports.sql.base_sql_transport import BaseSQLTransport, SQLLogRow
 
 
