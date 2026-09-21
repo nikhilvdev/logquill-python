@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from adversarial import meta_dicts
 from hypothesis import HealthCheck, given, settings
-from hypothesis import strategies as st
 
 from logquill.logger import Logger
 from logquill.plugins.context_plugin import ContextPlugin
@@ -11,31 +11,6 @@ from logquill.plugins.pii_redact_plugin import PIIRedactPlugin
 from logquill.plugins.redact_plugin import RedactPlugin
 from logquill.plugins.tamper_evident_plugin import TamperEvidentPlugin
 from logquill.transports.transport import CollectingTransport
-
-# Deliberately adversarial: deeply nested containers, unusual scalar types,
-# and non-JSON-serializable values (a raw object, bytes). Circular
-# references are exercised separately below, since hypothesis strategies
-# can't easily generate them.
-_scalars = st.one_of(
-    st.none(),
-    st.booleans(),
-    st.integers(),
-    st.floats(allow_nan=True, allow_infinity=True),
-    st.text(),
-    st.binary(),
-    st.builds(object),
-)
-
-_meta_values = st.recursive(
-    _scalars,
-    lambda children: st.one_of(
-        st.lists(children, max_size=5),
-        st.dictionaries(st.text(min_size=1, max_size=10), children, max_size=5),
-    ),
-    max_leaves=25,
-)
-
-_meta_dicts = st.dictionaries(st.text(min_size=1, max_size=10), _meta_values, max_size=8)
 
 
 def _build_logger() -> tuple[Logger, CollectingTransport]:
@@ -54,7 +29,7 @@ def _build_logger() -> tuple[Logger, CollectingTransport]:
 
 
 @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
-@given(meta=_meta_dicts)
+@given(meta=meta_dicts)
 def test_pipeline_never_crashes_on_adversarial_meta(meta: dict[str, Any]) -> None:
     logger, _sink = _build_logger()
 

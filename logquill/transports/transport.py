@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from logquill.formatter import Formatter, JSONFormatter
+from logquill.formatters import Formatter, JSONFormatter
 from logquill.records import LogRecord
 
 

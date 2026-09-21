@@ -60,3 +60,14 @@ def test_a_meta_key_named_message_does_not_collide_with_the_positional_arg() -> 
     assert record is not None
     assert record["message"] == "hello"
     assert record["meta"] == {"message": "not the real message"}
+
+
+def test_a_malformed_exc_info_is_ignored_instead_of_crashing_the_caller() -> None:
+    logger = Logger("app.test")
+
+    for bad in ([None, None, []], (1,), "boom", 42, object()):
+        record = logger.error("still logs", exc_info=bad)
+
+        assert record is not None
+        assert "stack" not in record["meta"]
+        assert "exc_info" not in record["meta"]

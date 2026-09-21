@@ -2,11 +2,14 @@ from logquill.adapters.base import LogQuillAdapter
 from logquill.config import load_config, logger_from_env, logger_from_file
 from logquill.context import bind_context, current_context
 from logquill.exceptions import format_exc_info
-from logquill.formatter import Formatter, JSONFormatter
+from logquill.formatters import Formatter, JSONFormatter, LogfmtFormatter, TextFormatter
 from logquill.handler import LogQuillHandler
 from logquill.levels import Level, parse_level
 from logquill.logger import Logger
+from logquill.opt import OptLogger
+from logquill.parsing import TEXT_LOG_CASTS, TEXT_LOG_PATTERN, parse, parse_logfmt
 from logquill.plugins.alerting_plugin import AlertingPlugin
+from logquill.plugins.apprise_alert_plugin import AppriseAlertPlugin
 from logquill.plugins.context_plugin import ContextPlugin
 from logquill.plugins.email_alert_plugin import EmailAlertPlugin
 from logquill.plugins.pagerduty_alert_plugin import PagerDutyAlertPlugin
@@ -21,6 +24,7 @@ from logquill.plugins.tamper_evident_plugin import TamperEvidentPlugin
 from logquill.plugins.trace_context_plugin import TraceContextPlugin
 from logquill.records import LogRecord
 from logquill.serverless import with_azure_function, with_cloud_function, with_lambda
+from logquill.toggle import disable, enable, is_enabled
 from logquill.transports.batching_transport import BatchingTransport
 from logquill.transports.cloud.app_insights_transport import AppInsightsTransport
 from logquill.transports.cloud.cloud_logging_transport import CloudLoggingTransport
@@ -51,6 +55,7 @@ __version__ = "1.0.0"
 
 __all__ = [
     "AlertingPlugin",
+    "AppriseAlertPlugin",
     "AppInsightsTransport",
     "AsyncWorker",
     "BaseQueueTransport",
@@ -72,6 +77,7 @@ __all__ = [
     "JSONFormatter",
     "KafkaTransport",
     "Level",
+    "LogfmtFormatter",
     "LogQuillAdapter",
     "LogQuillHandler",
     "LogRecord",
@@ -79,6 +85,7 @@ __all__ = [
     "MongoDBTransport",
     "MySQLTransport",
     "NewRelicTransport",
+    "OptLogger",
     "PIIRedactPlugin",
     "PagerDutyAlertPlugin",
     "Plugin",
@@ -95,16 +102,24 @@ __all__ = [
     "SamplingPlugin",
     "SlackAlertPlugin",
     "SyslogTransport",
+    "TEXT_LOG_CASTS",
+    "TEXT_LOG_PATTERN",
     "TamperEvidentPlugin",
+    "TextFormatter",
     "TraceContextPlugin",
     "Transport",
     "bind_context",
     "current_context",
+    "disable",
+    "enable",
     "format_exc_info",
+    "is_enabled",
     "load_config",
     "logger_from_env",
     "logger_from_file",
+    "parse",
     "parse_level",
+    "parse_logfmt",
     "with_azure_function",
     "with_cloud_function",
     "with_lambda",

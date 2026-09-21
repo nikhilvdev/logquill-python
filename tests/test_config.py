@@ -177,3 +177,37 @@ def test_logger_from_env_custom_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
     logger = logger_from_env(prefix="MYAPP_")
 
     assert logger.level == Level.ERROR
+
+
+def test_transport_options_can_name_a_builtin_formatter() -> None:
+    from logquill import LogfmtFormatter, TextFormatter
+
+    logger = load_config(
+        {
+            "transports": [
+                {"type": "console", "options": {"formatter": "text"}},
+                {"type": "console", "options": {"formatter": "logfmt"}},
+                {"type": "console", "options": {"formatter": "json"}},
+            ]
+        }
+    )
+
+    formatters = [transport.formatter for transport in logger.transports]
+    assert isinstance(formatters[0], TextFormatter)
+    assert isinstance(formatters[1], LogfmtFormatter)
+    assert type(formatters[2]).__name__ == "JSONFormatter"
+
+
+def test_an_unknown_formatter_name_lists_the_valid_ones() -> None:
+    with pytest.raises(ValueError, match="Unknown formatter 'xml'.*json, logfmt, text"):
+        load_config({"transports": [{"type": "console", "options": {"formatter": "xml"}}]})
+
+
+def test_flush_at_exit_can_be_set_from_config() -> None:
+    from logquill import shutdown
+
+    opted_out = load_config({"flush_at_exit": False})
+    default = load_config({})
+
+    assert opted_out not in shutdown._loggers
+    assert default in shutdown._loggers

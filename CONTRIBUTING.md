@@ -15,7 +15,14 @@ pre-commit install
 ruff check .
 mypy logquill
 pytest
+pytest benchmarks   # memory budgets for the logging hot path
 ```
+
+`pytest benchmarks` measures how much memory a log call and a stalled-sink
+burst use, and fails if a change pushes either past its budget in
+`benchmarks/measure.py`. It's separate from `pytest` because coverage's line
+tracing distorts the numbers; CI runs it as its own job. If a change
+legitimately needs more memory, raise the budget in the same PR and say why.
 
 ## Pull request strategy
 
@@ -31,7 +38,7 @@ pytest
   4. `CHANGELOG.md` has an entry under `Unreleased`
   5. Nothing in the cross-language contract table silently diverged from `logquill-js`
      (open a tracking issue there if it changed)
-- **CI must be green** (`ruff check`, `mypy logquill`, `pytest`) and **at
+- **CI must be green** (`ruff check`, `mypy logquill`, `pytest`, `pytest benchmarks`) and **at
   least one review approval** is required before merge — enforced by branch
   protection on `main`.
 - **Squash-merge** into `main` — keep the squash commit message a clear

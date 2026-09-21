@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 
@@ -203,3 +204,22 @@ async def test_drain_async_awaits_completion_without_blocking_the_event_loop() -
     assert await worker.drain_async(timeout=2.0) is True
     assert sorted(seen) == list(range(20))
     worker.close()
+
+
+def test_the_first_drop_warns_even_when_the_monotonic_clock_is_still_near_zero(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # the monotonic clock's zero point is arbitrary (boot time on many
+    # platforms), so a process started shortly after boot must still warn
+    monkeypatch.setattr("logquill.worker.time.monotonic", lambda: 5.0)
+    gate = threading.Event()
+    worker = AsyncWorker(max_queue_size=1, backpressure="drop_newest")
+
+    with caplog.at_level(logging.WARNING, logger="logquill"):
+        worker.submit(gate.wait)  # occupies the worker thread
+        worker.submit(lambda: None)  # fills the queue
+        worker.submit(lambda: None)  # dropped
+    gate.set()
+    worker.close()
+
+    assert any("queue full" in record.getMessage() for record in caplog.records)

@@ -4,13 +4,16 @@ import contextlib
 import logging
 from typing import Any
 
+from logquill import shutdown
 from logquill.context import current_context
-from logquill.exceptions import format_exc_info
+from logquill.exceptions import LocalRedactor, format_exc_info
 from logquill.levels import Level, parse_level
+from logquill.opt import OptLogger, caller_info, resolve_lazy
 from logquill.plugins.context_plugin import ContextPlugin
 from logquill.plugins.plugin import FunctionPlugin, MiddlewareFunc, Plugin
 from logquill.records import LogRecord, create_record
 from logquill.span import SpanContext, current_span_id
+from logquill.toggle import is_enabled
 from logquill.transports.transport import Transport
 from logquill.worker import AsyncWorker, BackpressurePolicy
 
@@ -35,6 +38,7 @@ class Logger:
         async_dispatch: bool = False,
         max_queue_size: int = 10_000,
         backpressure: BackpressurePolicy = "drop_oldest",
+        flush_at_exit: bool = True,
     ) -> None:
         """`async_dispatch=True` moves per-record transport writes (and the
         `after_log` plugin hooks that follow them) onto a background thread,
@@ -47,6 +51,15 @@ class Logger:
         `max_queue_size`/`backpressure` are only meaningful with
         `async_dispatch=True` — see `AsyncWorker` for what each
         `backpressure` policy does under a sustained burst.
+
+        `flush_at_exit=True` (the default) drains queued records and closes
+        this logger's transports when the interpreter exits, so a script that
+        ends without calling `close()` doesn't lose its last records or a
+        batching transport's unsent batch. Pass `False` if you manage
+        shutdown yourself. It runs on a normal exit (end of script,
+        `sys.exit()`, an unhandled exception) but not when the process is
+        killed outright (`SIGKILL`, `os._exit()`, or `SIGTERM` with no
+        handler installed) — handle `SIGTERM` and call `close()` for that.
         """
         self.name = name
         self._level = parse_level(level)
@@ -59,6 +72,8 @@ class Logger:
             if async_dispatch
             else None
         )
+        if flush_at_exit:
+            shutdown.register(self)
 
     @property
     def level(self) -> Level:
@@ -141,6 +156,32 @@ class Logger:
             self._worker.close(timeout)
         for transport in self.transports:
             transport.close()
+            shutdown.mark_closed(transport)
+
+    def opt(self, *, lazy: bool = False, depth: int | None = None) -> OptLogger:
+        """A view of this logger with per-call options — `lazy=True` to
+        defer expensive `meta` values until the record is really emitted,
+        `depth=N` to report the caller `N` frames up the stack. See
+        `OptLogger`.
+        """
+        return OptLogger(self, lazy=lazy, depth=depth)
+
+    def _local_redactor(self) -> LocalRedactor:
+        """Chain every plugin's `redact_local` into one function for
+        `diagnose` mode. A plugin whose hook raises fails closed: the value
+        is masked rather than shown, since the alternative is leaking exactly
+        what that plugin exists to hide."""
+        plugins = list(self.plugins)
+
+        def redact(name: str, text: str) -> str:
+            for plugin in plugins:
+                try:
+                    text = plugin.redact_local(name, text)
+                except Exception:
+                    return "<redaction failed>"
+            return text
+
+        return redact
 
     def _notify_error(self, plugin: Plugin, exc: Exception, record: LogRecord) -> None:
         # a broken error handler must not crash logging either
@@ -167,12 +208,45 @@ class Logger:
             except Exception as exc:
                 self._notify_error(plugin, exc, record)
 
-    def _log(self, level: Level, message: str, meta: dict[str, Any]) -> LogRecord | None:
-        if level < self._level:
+    def _log(
+        self,
+        level: Level,
+        message: str,
+        meta: dict[str, Any],
+        *,
+        lazy: bool = False,
+        depth: int | None = None,
+    ) -> LogRecord | None:
+        if level < self._level or not is_enabled(self.name):
             return None
 
+        if lazy:
+            meta = resolve_lazy(meta)
+
+        if depth is not None:
+            caller = caller_info(depth)
+            if caller is not None:
+                meta.setdefault("caller", caller)
+
+        diagnose = bool(meta.pop("diagnose", False))
+        if diagnose:
+            meta.setdefault("exc_info", True)
         if "exc_info" in meta:
-            stack = format_exc_info(meta.pop("exc_info"))
+            exc_info = meta.pop("exc_info")
+            try:
+                stack = format_exc_info(
+                    exc_info,
+                    diagnose=diagnose,
+                    redact_local=self._local_redactor() if diagnose else None,
+                )
+            except Exception:
+                # a malformed value must not crash the caller that's just logging
+                _logger.warning(
+                    "Logger: ignoring exc_info=%r — it must be True, an exception instance, "
+                    "or a (type, value, traceback) tuple",
+                    exc_info,
+                )
+                stack = None
             if stack is not None:
                 meta["stack"] = stack
 
@@ -236,7 +310,16 @@ class Logger:
         tuple — the same shapes stdlib `logging` accepts) formats a
         traceback into `meta["stack"]` and is otherwise not kept in `meta`
         as-is, since a raw exception object isn't serializable. Every
-        `Logger` method accepts it, not just this one."""
+        `Logger` method accepts it, not just this one.
+
+        `diagnose=True` additionally writes each frame's local variable
+        values into that traceback (and implies `exc_info=True` if none was
+        given). **Off by default, and it can leak sensitive data** —
+        whatever a local holds (a password, a token, a request body) ends up
+        in the log, so keep it off in production. Locals are passed through
+        the registered `RedactPlugin`/`PIIRedactPlugin` before the traceback
+        is formatted, but that only masks what those plugins are configured
+        to recognize (by variable name, or by PII pattern in the value)."""
         return self._log(Level.ERROR, message, meta)
 
     def fatal(self, message: str, /, **meta: Any) -> LogRecord | None:

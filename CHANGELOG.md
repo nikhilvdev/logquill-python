@@ -2,6 +2,62 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+- Added the 1.0 features that hadn't shipped yet, plus hardening:
+  - `logger.opt(lazy=True)` defers callable `meta` values until a record is
+    really going to be emitted, so an expensive `DEBUG`/`TRACE` argument costs
+    nothing when the level filters the call out. A callable that raises leaves
+    a placeholder in the record instead of crashing the caller.
+    `logger.opt(depth=N)` adds `meta.caller` (`module`, `function`, `line`,
+    `file`) naming the code that logged, `N` frames up, so a call made from a
+    wrapper or decorator reports the wrapper's caller.
+  - `logquill.disable(name)` / `logquill.enable(name)` switch off a logger and
+    everything nested under it (most specific rule wins), so a library that
+    logs through LogQuill can be silent in its host application by default —
+    `logquill.disable(__name__)` — and the application can turn it back on.
+  - Two new formatters: `TextFormatter` (a human-readable entry per record,
+    with tracebacks on the lines below) and `LogfmtFormatter` (single-line
+    `key=value` output; values are quoted so a record is always one line).
+    Formatters now live in the `logquill.formatters` package;
+    `logquill.formatter` still works. A transport's `options` in a config file
+    can name one: `{"formatter": "text"}`. `logquill tail` now prints
+    tracebacks the same way `TextFormatter` does.
+  - `parse(source, pattern, cast=...)` extracts structured fields from a log
+    file with a regex — including legacy and third-party formats — streaming
+    line by line. `parse_logfmt()` reads logfmt back, and `TEXT_LOG_PATTERN`
+    reads `TextFormatter` output.
+  - `AppriseAlertPlugin` (`pip install logquill[apprise]`) sends alerts
+    through Apprise, reaching 100+ notification services with the same
+    deduplication and non-blocking behavior as the other alerting plugins.
+  - Every `Logger` now flushes and closes its transports at interpreter exit
+    (an `atexit` hook), so a script that never calls `close()` no longer loses
+    its last queued records or a batching transport's unsent batch. Opt out
+    with `Logger(flush_at_exit=False)` or `"flush_at_exit": false` in config.
+  - `diagnose=True` on any `Logger` method adds each traceback frame's local
+    variable values. Off by default, with an explicit warning in the docs and
+    once per process in the log: it can leak sensitive data. Captured values
+    go through `RedactPlugin` and `PIIRedactPlugin` *before* the traceback is
+    formatted (via a new optional `Plugin.redact_local` hook), and a plugin
+    whose hook raises masks the value instead of showing it.
+  - `HTTPTransport(backend="aiohttp")` sends over one reused keep-alive
+    connection, giving the `http` extra a purpose. Also, `HTTPTransport` now
+    bounds its buffer by `max_bytes` as well as `batch_size`, and a failed
+    send is logged with an actionable message and the batch dropped, rather
+    than raising into the code that logged.
+  - Fixed: the async queue's "dropping records" warning could stay silent for
+    the first minute after a process started, because its rate limiter
+    compared against a monotonic clock whose zero point is arbitrary.
+  - Fixed: passing a malformed `exc_info` (for example a forwarded dict that
+    happens to carry a bad `exc_info` key) raised out of the log call. It is
+    now ignored with a warning, like any other bad `meta`.
+  - A memory-budget suite (`pytest benchmarks`, its own CI job) fails the
+    build if a log call, a level-filtered call, or a burst into a stalled
+    sink uses materially more memory than it does today. New tests burst
+    30,000 records at a stalled transport under each backpressure policy and
+    assert exactly which records survive, and `hypothesis` coverage now
+    extends to the formatters and transports.
+
 ## 1.0.0 - 2026-09-05
 
 - First stable release: bumped the `Development Status` classifier from

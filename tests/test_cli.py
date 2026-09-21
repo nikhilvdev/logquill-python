@@ -176,3 +176,23 @@ def test_tail_follow_picks_up_appended_records(tmp_path: Path) -> None:
 
     assert "second" in follow_out.getvalue()
     assert "first" not in follow_out.getvalue()
+
+
+def test_tail_prints_a_stack_trace_on_its_own_lines(tmp_path: Path) -> None:
+    log_path = tmp_path / "app.log"
+    _write_lines(
+        log_path,
+        [
+            {
+                "timestamp": "2026-01-01T00:00:00.000Z",
+                "level": "ERROR",
+                "logger": "app",
+                "message": "failed",
+                "meta": {"stack": "Traceback (most recent call last):\nValueError: nope\n"},
+            }
+        ],
+    )
+
+    output, _warn, _exit_code = _tail(str(log_path))
+
+    assert output.splitlines()[1:] == ["Traceback (most recent call last):", "ValueError: nope"]

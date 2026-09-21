@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Iterable, Protocol, Sequence
 
-from logquill.formatter import Formatter
+from logquill.formatters import Formatter
 from logquill.transports.sql.base_sql_transport import BaseSQLTransport, SQLLogRow
 
 

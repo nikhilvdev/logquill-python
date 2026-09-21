@@ -30,3 +30,10 @@ class RedactPlugin(Plugin):
             for key, value in meta.items()
         }
         return record
+
+    def redact_local(self, name: str, text: str) -> str:
+        """Masks a local variable captured by `diagnose=True` when its name
+        matches `keys` (case-insensitively) — the same rule `before_log`
+        applies to `meta` keys, so `password`, `token` and friends never
+        reach a traceback either."""
+        return self.replacement if name.lower() in self.keys else text

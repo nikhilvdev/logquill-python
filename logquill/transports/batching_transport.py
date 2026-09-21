@@ -5,7 +5,7 @@ import logging
 from abc import abstractmethod
 from typing import Generic, Sequence, TypeVar, cast
 
-from logquill.formatter import Formatter
+from logquill.formatters import Formatter
 from logquill.records import LogRecord
 from logquill.transports.transport import Transport
 

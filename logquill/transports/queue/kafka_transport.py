@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Protocol, Sequence, cast
 
-from logquill.formatter import Formatter
+from logquill.formatters import Formatter
 from logquill.records import LogRecord
 from logquill.transports.queue.base_queue_transport import BaseQueueTransport
 
