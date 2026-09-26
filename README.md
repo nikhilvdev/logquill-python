@@ -3,7 +3,7 @@
 [![CI](https://github.com/nikhilvdev/logquill-python/actions/workflows/ci.yml/badge.svg)](https://github.com/nikhilvdev/logquill-python/actions/workflows/ci.yml)
 [![Publish](https://github.com/nikhilvdev/logquill-python/actions/workflows/release.yml/badge.svg)](https://github.com/nikhilvdev/logquill-python/actions/workflows/release.yml)
 [![PyPI](https://img.shields.io/pypi/v/logquill.svg)](https://pypi.org/project/logquill/)
-[![Python versions](https://img.shields.io/badge/python-3.8%2B-blue.svg)](pyproject.toml)
+[![Python versions](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/github/license/nikhilvdev/logquill-python)](LICENSE)
 [![GitHub tag](https://img.shields.io/github/v/tag/nikhilvdev/logquill-python)](https://github.com/nikhilvdev/logquill-python/tags)
 [![Downloads](https://static.pepy.tech/badge/logquill)](https://pepy.tech/project/logquill)
@@ -37,6 +37,8 @@ for what's landed so far.
 
 ## Install
 
+Requires Python 3.10 or newer (2.0 raised the floor from 3.8; see [MIGRATING.md](MIGRATING.md)).
+
 ```bash
 pip install logquill
 ```
@@ -50,8 +52,8 @@ logger = Logger("app", level=Level.INFO)
 
 record = logger.info("user signed up", user_id=42, plan="pro")
 print(record)
-# {'timestamp': '2026-08-27T18:04:12.345Z', 'level': 'INFO', 'logger': 'app',
-#  'message': 'user signed up', 'meta': {'user_id': 42, 'plan': 'pro'}}
+# {'schema_version': '2.0', 'timestamp': '2026-08-27T18:04:12.345Z', 'level': 'INFO',
+#  'logger': 'app', 'message': 'user signed up', 'meta': {'user_id': 42, 'plan': 'pro'}}
 
 logger.debug("below threshold, dropped")  # -> None, filtered by level
 logger.set_level("debug")
@@ -59,7 +61,7 @@ logger.debug("now visible")  # -> a record dict
 ```
 
 Every log call returns the record dict (or `None` if filtered by level) —
-`{"timestamp": ISO8601, "level": str, "logger": str, "message": str, "meta": dict}`,
+`{"schema_version": "2.0", "timestamp": ISO8601, "level": str, "logger": str, "message": str, "meta": dict}`,
 the same shape shared with [`logquill` on npm](https://www.npmjs.com/package/logquill).
 Use `JSONFormatter` to serialize a record to the canonical JSON line:
 
@@ -67,7 +69,39 @@ Use `JSONFormatter` to serialize a record to the canonical JSON line:
 from logquill import JSONFormatter
 
 print(JSONFormatter().format(record))
-# '{"timestamp":"2026-08-27T18:04:12.345Z","level":"INFO","logger":"app","message":"user signed up","meta":{"user_id":42,"plan":"pro"}}'
+# '{"schema_version":"2.0","timestamp":"2026-08-27T18:04:12.345Z","level":"INFO","logger":"app","message":"user signed up","meta":{"user_id":42,"plan":"pro"}}'
+```
+
+### The record schema
+
+The record shape is defined precisely by [`schema/record.schema.json`](schema/record.schema.json)
+(JSON Schema 2020-12), the same file `logquill` on npm is tested against, with
+a shared set of [golden records](schema/golden_records.json) that both
+packages' test suites run. Two things to know:
+
+- `schema_version` is on every record. `parse_record()` reads a record another
+  process wrote, and accepts both 2.x records and logquill 1.x ones (which have
+  no `schema_version` and come back labelled `"1.0"`). It raises `ValueError`,
+  saying what to fix, for anything that isn't a LogQuill record.
+- An LLM call's cost and latency have their own top-level `llm` block
+  (`model`, `tokens_in`, `tokens_out`, `cost_usd`, `latency_ms`,
+  `finish_reason`), not free-form `meta`; `meta.retry_count`,
+  `meta.state_diff` and `meta.mcp.server`/`meta.mcp.tool` are reserved with
+  fixed types.
+
+```python
+import json
+
+from logquill import JSONFormatter, Logger, parse_record
+
+logger = Logger("app")
+line = JSONFormatter().format(logger.info("user signed up", user_id=42))
+
+assert parse_record(json.loads(line))["schema_version"] == "2.0"
+
+# a line written by logquill 1.x
+old = '{"timestamp":"2026-01-01T00:00:00.000Z","level":"INFO","logger":"app","message":"hi","meta":{}}'
+assert parse_record(json.loads(old))["schema_version"] == "1.0"
 ```
 
 ## Config

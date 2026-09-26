@@ -154,3 +154,27 @@ def test_logfmt_round_trips_through_parse_logfmt() -> None:
     assert fields["n"] == "7"
     assert fields["empty"] == ""
     assert fields["message"] == "user signed up"
+
+
+def test_text_and_logfmt_show_an_llm_block() -> None:
+    record = _record("chat", kind="action")
+    record["llm"] = {"model": "m1", "tokens_in": 5, "cost_usd": 0.25}
+
+    assert 'llm={"model":"m1","tokens_in":5,"cost_usd":0.25}' in TextFormatter().format(record)
+    fields = parse_logfmt(LogfmtFormatter().format(record))
+    assert fields["llm.model"] == "m1"
+    assert fields["llm.tokens_in"] == "5"
+    assert fields["kind"] == "action"
+
+
+def test_the_text_pattern_reads_an_llm_block_back() -> None:
+    from logquill import TEXT_LOG_CASTS, TEXT_LOG_PATTERN, parse
+
+    record = _record("chat", kind="action")
+    record["llm"] = {"model": "m1", "tokens_in": 5}
+
+    (entry,) = parse([TextFormatter().format(record)], TEXT_LOG_PATTERN, cast=TEXT_LOG_CASTS)
+
+    assert entry["message"] == "chat"
+    assert entry["llm"] == {"model": "m1", "tokens_in": 5}
+    assert entry["meta"] == {"kind": "action"}

@@ -9,16 +9,16 @@ from typing import Any
 
 #: Matches one entry written by `TextFormatter` (single-line entries; a
 #: traceback printed on the lines after an entry isn't part of the match).
-#: Pass with `cast=TEXT_LOG_CASTS` to get `meta` back as a dict:
+#: Pass with `cast=TEXT_LOG_CASTS` to get `meta` (and an LLM call's `llm`) back as dicts:
 #:
 #:     parse("app.log", TEXT_LOG_PATTERN, cast=TEXT_LOG_CASTS)
 TEXT_LOG_PATTERN = (
     r"^(?P<timestamp>\S+) (?P<level>[A-Z]+)\s+(?P<logger>[^:\s]+): "
-    r"(?P<message>.*?)(?: (?P<meta>\{.*\}))?$"
+    r"(?P<message>.*?)(?: llm=(?P<llm>\{[^{}]*\}))?(?: (?P<meta>\{.*\}))?$"
 )
 
-#: `cast` mapping that decodes the `meta` group of `TEXT_LOG_PATTERN` from JSON.
-TEXT_LOG_CASTS: dict[str, Callable[[str], Any]] = {"meta": json.loads}
+#: `cast` mapping that decodes the `meta` and `llm` groups of `TEXT_LOG_PATTERN` from JSON.
+TEXT_LOG_CASTS: dict[str, Callable[[str], Any]] = {"meta": json.loads, "llm": json.loads}
 
 
 def parse(

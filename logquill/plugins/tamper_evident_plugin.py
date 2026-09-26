@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from logquill.plugins.plugin import Plugin
-from logquill.records import LogRecord
+from logquill.records import LEGACY_SCHEMA_VERSION, LogRecord
 
 GENESIS_HASH = "0" * 64
 
@@ -68,15 +68,20 @@ class TamperEvidentPlugin(Plugin):
 
 def _compute_hash(record: Mapping[str, Any], prev_hash: str) -> str:
     meta = record.get("meta", {})
-    payload = json.dumps(
-        {
-            "timestamp": record.get("timestamp"),
-            "level": record.get("level"),
-            "logger": record.get("logger"),
-            "message": record.get("message"),
-            "meta": {k: v for k, v in meta.items() if k not in ("hash", "prev_hash")},
-        },
-        sort_keys=True,
-        default=str,
-    )
+    content: dict[str, Any] = {
+        "timestamp": record.get("timestamp"),
+        "level": record.get("level"),
+        "logger": record.get("logger"),
+        "message": record.get("message"),
+        "meta": {k: v for k, v in meta.items() if k not in ("hash", "prev_hash")},
+    }
+    # `schema_version` and `llm` are covered when present, so editing either is
+    # caught. A `schema_version` of "1.0" is what `parse_record` labels a record
+    # that had none, so it's left out: a chain written by logquill 1.x verifies
+    # the same before and after parsing.
+    if record.get("schema_version", LEGACY_SCHEMA_VERSION) != LEGACY_SCHEMA_VERSION:
+        content["schema_version"] = record["schema_version"]
+    if "llm" in record:
+        content["llm"] = record["llm"]
+    payload = json.dumps(content, sort_keys=True, default=str)
     return hashlib.sha256(f"{prev_hash}{payload}".encode()).hexdigest()

@@ -1,6 +1,6 @@
 import logging
 import sys
-from typing import List, Sequence, Tuple
+from typing import Sequence
 
 import pytest
 
@@ -12,7 +12,7 @@ class FakeSender:
     """Fake sink standing in for the network call, so tests never hit the wire."""
 
     def __init__(self) -> None:
-        self.calls: List[Tuple[str, Sequence[str]]] = []
+        self.calls: list[tuple[str, Sequence[str]]] = []
 
     def __call__(self, url: str, batch: Sequence[str]) -> None:
         self.calls.append((url, list(batch)))
@@ -67,7 +67,7 @@ def test_flushes_early_when_the_buffered_bytes_reach_max_bytes() -> None:
 def test_a_failing_sender_is_logged_not_raised_and_later_records_still_flow(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    calls: List[int] = []
+    calls: list[int] = []
 
     def flaky(url: str, batch: Sequence[str]) -> None:
         calls.append(len(batch))

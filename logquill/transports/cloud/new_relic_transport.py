@@ -7,7 +7,7 @@ import time
 import urllib.error
 import urllib.request
 from email.utils import parsedate_to_datetime
-from typing import Callable, Dict, Literal, Sequence, TypedDict
+from typing import Callable, Literal, Sequence, TypedDict, cast
 
 from logquill.formatters import Formatter
 from logquill.records import LogRecord
@@ -33,7 +33,7 @@ class NewRelicSenderResult(TypedDict):
     retry_after: str | None
 
 
-NewRelicSender = Callable[[str, Dict[str, str], bytes], NewRelicSenderResult]
+NewRelicSender = Callable[[str, dict[str, str], bytes], NewRelicSenderResult]
 
 
 def _urllib_sender(url: str, headers: dict[str, str], body: bytes) -> NewRelicSenderResult:
@@ -50,13 +50,7 @@ def _urllib_sender(url: str, headers: dict[str, str], body: bytes) -> NewRelicSe
 def _without_event_type(record: LogRecord) -> LogRecord:
     meta = dict(record["meta"])
     meta.pop("eventType", None)
-    return LogRecord(
-        timestamp=record["timestamp"],
-        level=record["level"],
-        logger=record["logger"],
-        message=record["message"],
-        meta=meta,
-    )
+    return cast(LogRecord, {**record, "meta": meta})
 
 
 def _resume_timestamp(retry_after: str | None, now: float) -> float:

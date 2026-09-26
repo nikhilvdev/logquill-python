@@ -81,6 +81,7 @@ class LogfmtFormatter:
 
         timestamp=2026-01-01T00:00:00.000Z level=INFO logger=app message="user signed up" user_id=42
 
+    An LLM call's `llm` block follows as `llm.model=...`, `llm.tokens_in=...`.
     `meta` keys are emitted as top-level pairs after the four record fields;
     nested dicts flatten to dotted keys (`http.status=200`); lists are
     emitted as a JSON string. Values containing whitespace, `=`, quotes, or
@@ -101,6 +102,9 @@ class LogfmtFormatter:
             f"logger={_quote(str(record['logger']))}",
             f"message={_quote(str(record['message']))}",
         ]
+        llm = record.get("llm")
+        if llm:
+            _flatten("llm", llm, 1, pairs)
         for meta_key, value in record["meta"].items():
             key = _key(meta_key)
             if key in _RESERVED_KEYS:

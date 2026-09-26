@@ -38,6 +38,8 @@ legitimately needs more memory, raise the budget in the same PR and say why.
   4. `CHANGELOG.md` has an entry under `Unreleased`
   5. Nothing in the cross-language contract table silently diverged from `logquill-js`
      (open a tracking issue there if it changed)
+     — if you change the record shape, change `schema/record.schema.json` and
+     `schema/golden_records.json` together (see `schema/README.md`)
 - **CI must be green** (`ruff check`, `mypy logquill`, `pytest`, `pytest benchmarks`) and **at
   least one review approval** is required before merge — enforced by branch
   protection on `main`.

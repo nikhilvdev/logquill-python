@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import functools
 import inspect
-from typing import Any, Callable, Sequence, TypeVar, Union, cast
+from typing import Any, Callable, Sequence, TypeVar, cast
 
 from logquill.logger import Logger
 
 F = TypeVar("F", bound=Callable[..., Any])
 
-LoggerOrLoggers = Union[Logger, Sequence[Logger]]
+LoggerOrLoggers = Logger | Sequence[Logger]
 
 
 def _as_loggers(loggers: LoggerOrLoggers) -> tuple[Logger, ...]:
