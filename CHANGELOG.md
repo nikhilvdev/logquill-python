@@ -4,6 +4,32 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- **Breaking: the record shape and the Python floor changed.** See
+  [MIGRATING.md](MIGRATING.md).
+  - logquill now requires **Python 3.10 or newer** and is tested on 3.10–3.14.
+    Python 3.8 and 3.9 are end-of-life; pip on those interpreters keeps
+    installing 1.x.
+  - Every record now carries `schema_version` (`"2.0"`). Nothing was renamed or
+    removed, so a reader only breaks if it insists on exactly the five 1.x
+    keys. `parse_record()` reads 1.x and 2.x records alike, labelling a 1.x
+    record `"1.0"`.
+  - New reserved fields, shared with `logquill` on npm: a top-level `llm` block
+    (`model`, `tokens_in`, `tokens_out`, `cost_usd`, `latency_ms`,
+    `finish_reason`) for LLM calls, plus `meta.retry_count`, `meta.state_diff`
+    and `meta.mcp.server`/`meta.mcp.tool`. The text and logfmt formatters show
+    the `llm` block. Nothing writes these on its own yet.
+  - `TamperEvidentPlugin` now covers `schema_version` and `llm` in the hash, so
+    editing either is caught; hash chains written by 1.x still verify.
+  - Fixed: the New Relic transport rebuilt each record from its five 1.x fields
+    and would have dropped `schema_version` and `llm`; it now copies the record.
+  - The record format now has a machine-readable definition,
+    `schema/record.schema.json` (JSON Schema 2020-12), and a shared file of
+    golden records, `schema/golden_records.json`. `tests/test_contract.py`
+    checks the schema, the golden records, the parser, and everything the
+    logger actually writes against each other, so drift between the Python and
+    JavaScript packages now fails a test instead of relying on a reviewer to
+    notice.
+
 - Added the 1.0 features that hadn't shipped yet, plus hardening:
   - `logger.opt(lazy=True)` defers callable `meta` values until a record is
     really going to be emitted, so an expensive `DEBUG`/`TRACE` argument costs

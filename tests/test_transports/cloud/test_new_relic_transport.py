@@ -48,6 +48,28 @@ def test_region_url_gzip_body_and_headers() -> None:
     assert records[0]["meta"]["extra"] == "kept"
 
 
+def test_stripping_event_type_keeps_the_schema_version_and_llm_block() -> None:
+    from logquill import Level
+    from logquill.records import create_record
+
+    sender = FakeSender()
+    transport = NewRelicTransport(license_key="lk-1", sender=sender, max_records=1)
+    record = create_record(
+        level=Level.INFO,
+        logger="app.test",
+        message="chat",
+        meta={"eventType": "Custom"},
+        llm={"model": "m", "tokens_in": 3},
+    )
+
+    transport.write("", record)
+
+    (sent,) = json.loads(gzip.decompress(sender.calls[0][2]))
+    assert sent["schema_version"] == "2.0"
+    assert sent["llm"] == {"model": "m", "tokens_in": 3}
+    assert "eventType" not in sent["meta"]
+
+
 def test_429_pauses_sends_and_drops_batches_during_the_window() -> None:
     sender = FakeSender()
     sender.results = [{"ok": False, "status": 429, "retry_after": "60"}]

@@ -29,6 +29,9 @@ def format_text(record: Mapping[str, Any]) -> str:
         f"{record.get('timestamp', '?')} {str(record.get('level', '?')):<5} "
         f"{record.get('logger', '?')}: {record.get('message', '')}"
     )
+    llm = record.get("llm")
+    if llm:
+        line += f" llm={_dump_meta(llm)}"
     if meta:
         line += f" {_dump_meta(meta)}"
     if stack is not None:

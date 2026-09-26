@@ -22,7 +22,7 @@ from logquill.plugins.sampling_plugin import SamplingPlugin
 from logquill.plugins.slack_alert_plugin import SlackAlertPlugin
 from logquill.plugins.tamper_evident_plugin import TamperEvidentPlugin
 from logquill.plugins.trace_context_plugin import TraceContextPlugin
-from logquill.records import LogRecord
+from logquill.records import SCHEMA_VERSION, LLMBlock, LogRecord, parse_record
 from logquill.serverless import with_azure_function, with_cloud_function, with_lambda
 from logquill.toggle import disable, enable, is_enabled
 from logquill.transports.batching_transport import BatchingTransport
@@ -78,6 +78,7 @@ __all__ = [
     "KafkaTransport",
     "Level",
     "LogfmtFormatter",
+    "LLMBlock",
     "LogQuillAdapter",
     "LogQuillHandler",
     "LogRecord",
@@ -96,6 +97,7 @@ __all__ = [
     "RedactPlugin",
     "RedisTransport",
     "RunPlugin",
+    "SCHEMA_VERSION",
     "SQLLogRow",
     "SQLiteTransport",
     "SQSTransport",
@@ -120,6 +122,7 @@ __all__ = [
     "parse",
     "parse_level",
     "parse_logfmt",
+    "parse_record",
     "with_azure_function",
     "with_cloud_function",
     "with_lambda",
