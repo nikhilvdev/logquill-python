@@ -4,7 +4,7 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 from logquill.levels import Level
-from logquill.records import LogRecord
+from logquill.records import LogRecord, build_llm_block
 
 if TYPE_CHECKING:
     from logquill.logger import Logger
@@ -122,4 +122,35 @@ class OptLogger:
         """`Logger.decision` with this view's options."""
         return self._logger._log(
             Level.INFO, message, {"kind": "decision", **meta}, lazy=self._lazy, depth=self._depth
+        )
+
+    def llm_call(
+        self,
+        message: str = "llm_call",
+        /,
+        *,
+        model: str | None = None,
+        tokens_in: int | None = None,
+        tokens_out: int | None = None,
+        cost_usd: float | None = None,
+        latency_ms: float | None = None,
+        finish_reason: str | None = None,
+        **meta: Any,
+    ) -> LogRecord | None:
+        """`Logger.llm_call` with this view's options."""
+        llm = build_llm_block(
+            model=model,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_usd=cost_usd,
+            latency_ms=latency_ms,
+            finish_reason=finish_reason,
+        )
+        return self._logger._log(
+            Level.INFO,
+            message,
+            {"kind": "action", **meta},
+            lazy=self._lazy,
+            depth=self._depth,
+            llm=llm,
         )

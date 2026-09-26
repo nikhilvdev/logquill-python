@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from logquill import shutdown
 from logquill.context import current_context
@@ -11,7 +11,8 @@ from logquill.levels import Level, parse_level
 from logquill.opt import OptLogger, caller_info, resolve_lazy
 from logquill.plugins.context_plugin import ContextPlugin
 from logquill.plugins.plugin import FunctionPlugin, MiddlewareFunc, Plugin
-from logquill.records import LogRecord, create_record
+from logquill.records import LLMBlock, LogRecord, build_llm_block, create_record
+from logquill.retry import RetryTracker
 from logquill.span import SpanContext, current_span_id
 from logquill.toggle import is_enabled
 from logquill.transports.transport import Transport
@@ -72,6 +73,7 @@ class Logger:
             if async_dispatch
             else None
         )
+        self._retries = RetryTracker()
         if flush_at_exit:
             shutdown.register(self)
 
@@ -166,6 +168,24 @@ class Logger:
         """
         return OptLogger(self, lazy=lazy, depth=depth)
 
+    def _track_retries(self, level: Level, meta: dict[str, Any]) -> None:
+        """Stamp `meta.retry_count` on a tool `.action()` that reopens a call
+        which hasn't succeeded yet, and end the chain on a successful
+        `.observation()` for it. Only records naming their tool in `meta.tool`
+        take part."""
+        tool = meta.get("tool")
+        if not isinstance(tool, str) or not tool:
+            return
+        call_id = meta.get("tool_call_id")
+        call_id = call_id if isinstance(call_id, str) else None
+        kind = meta.get("kind")
+        if kind == "action":
+            count = self._retries.opened(current_span_id(), tool, call_id)
+            if count > 0:
+                meta.setdefault("retry_count", count)
+        elif kind == "observation" and level < Level.ERROR and "error" not in meta:
+            self._retries.succeeded(current_span_id(), tool, call_id)
+
     def _local_redactor(self) -> LocalRedactor:
         """Chain every plugin's `redact_local` into one function for
         `diagnose` mode. A plugin whose hook raises fails closed: the value
@@ -216,12 +236,15 @@ class Logger:
         *,
         lazy: bool = False,
         depth: int | None = None,
+        llm: LLMBlock | None = None,
     ) -> LogRecord | None:
         if level < self._level or not is_enabled(self.name):
             return None
 
         if lazy:
             meta = resolve_lazy(meta)
+
+        self._track_retries(level, meta)
 
         if depth is not None:
             caller = caller_info(depth)
@@ -250,7 +273,7 @@ class Logger:
             if stack is not None:
                 meta["stack"] = stack
 
-        record = create_record(level=level, logger=self.name, message=message, meta=meta)
+        record = create_record(level=level, logger=self.name, message=message, meta=meta, llm=llm)
 
         bound_context = current_context()
         if bound_context:
@@ -347,6 +370,40 @@ class Logger:
         decision for a step or run, for harness/agentic tracing."""
         return self._log(Level.INFO, message, {"kind": "decision", **meta})
 
+    def llm_call(
+        self,
+        message: str = "llm_call",
+        /,
+        *,
+        model: str | None = None,
+        tokens_in: int | None = None,
+        tokens_out: int | None = None,
+        cost_usd: float | None = None,
+        latency_ms: float | None = None,
+        finish_reason: str | None = None,
+        **meta: Any,
+    ) -> LogRecord | None:
+        """Log one LLM call as an `.action()` carrying the record's first-class
+        `llm` block (`model`, `tokens_in`, `tokens_out`, `cost_usd`,
+        `latency_ms`, `finish_reason`). Those fields are what cost and latency
+        dashboards read, and what `OTLPTransport` exports as the standard token
+        and model attributes. Any you leave out are simply absent; one of the
+        wrong type is dropped with a warning rather than raising.
+
+        Extra keyword arguments go in `meta` as usual — e.g. `provider="openai"`.
+        Don't put prompt or completion text in `meta` unless you mean every
+        transport to receive it.
+        """
+        llm = build_llm_block(
+            model=model,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_usd=cost_usd,
+            latency_ms=latency_ms,
+            finish_reason=finish_reason,
+        )
+        return self._log(Level.INFO, message, {"kind": "action", **meta}, llm=llm)
+
     def span(
         self,
         name: str,
@@ -354,6 +411,7 @@ class Logger:
         *,
         span_id: str | None = None,
         parent_span_id: str | None = None,
+        capture_state: Callable[[], Any] | None = None,
         **meta: Any,
     ) -> SpanContext:
         """`with agent_log.span("call_llm"):` — on exit, emits one record
@@ -368,5 +426,21 @@ class Logger:
         `span_id`/`parent_span_id` normally auto-generate/auto-nest; pass
         them explicitly to adopt an id handed in from elsewhere (see
         `logquill.adapters.langchain.LangChainAdapter` for an example).
+
+        `capture_state=lambda: {...}` is called on entering and on leaving the
+        block, and what changed between the two is recorded as
+        `meta.state_diff` (`{"before": ..., "after": ...}`, only the keys that
+        changed when both are dicts; omitted if nothing did). The values are
+        deep-copied, so an in-place mutation is seen; a state that can't be
+        copied, or a callable that raises, just means no `state_diff`. It's
+        stored in `meta`, so a redaction plugin that recurses (`PIIRedactPlugin`)
+        sees it, but `RedactPlugin` only matches top-level keys.
         """
-        return SpanContext(self, name, span_id=span_id, parent_span_id=parent_span_id, **meta)
+        return SpanContext(
+            self,
+            name,
+            span_id=span_id,
+            parent_span_id=parent_span_id,
+            capture_state=capture_state,
+            **meta,
+        )

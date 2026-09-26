@@ -4,6 +4,32 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- LLM calls and OpenTelemetry export:
+  - `logger.llm_call(model=, tokens_in=, tokens_out=, cost_usd=, latency_ms=,
+    finish_reason=)` records an LLM call with its numbers in the record's
+    first-class `llm` block. A value that breaks the contract is dropped with a
+    warning instead of raising.
+  - `OTLPTransport` (`pip install logquill[otel]`) exports agent tracing as real
+    OpenTelemetry spans through the SDK: `span()` blocks, tool `.action()`s and
+    LLM calls, with the ids, parents and timings the records carry, so a
+    collector shows exactly the tree that was logged. Spans are named and
+    attributed per the OpenTelemetry GenAI conventions (`invoke_agent`,
+    `execute_tool`, `chat`, with token counts, model and finish reason).
+  - `OTelLogsTransport` sends every record as an OTLP log record, with the same
+    trace and span ids so logs and spans join up.
+  - The convention names live in one file, `logquill/semconv.py`, pinned to a
+    named release (semantic-conventions 1.44.0), because the GenAI conventions
+    are still experimental and have already renamed attributes.
+    `OTEL_SEMCONV_STABILITY_OPT_IN` is honored, `semconv_version="legacy"` picks
+    the older names, and old and new names are never emitted together. Prompt
+    and completion text is opt-in only.
+  - `span(name, capture_state=...)` records what changed during a block as
+    `meta.state_diff`, and a tool `.action()` that is reopened before it
+    succeeded gets `meta.retry_count` automatically.
+  - The record contract gained optional `meta` fields for this: `tool`,
+    `tool_call_id`, `provider`, `agent_name`, `agent_id`, `response_model`,
+    `operation`, and opt-in `input_messages` / `output_messages`.
+  - Type-checking no longer depends on whether OpenTelemetry is installed.
 - **Breaking: the record shape and the Python floor changed.** See
   [MIGRATING.md](MIGRATING.md).
   - logquill now requires **Python 3.10 or newer** and is tested on 3.10–3.14.

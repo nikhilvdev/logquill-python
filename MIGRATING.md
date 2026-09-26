@@ -47,8 +47,10 @@ LogQuill record, or one written by a newer major version.
 
 ## 3. New optional fields
 
-These are defined now so both languages agree on them. Nothing emits them on its
-own yet, and no record has them unless you add them.
+These are defined so both languages agree on them. `logger.llm_call()` writes
+the `llm` block, `span(capture_state=...)` writes `state_diff`, and repeated tool
+calls get `retry_count` automatically; nothing else writes them, and no record
+has them unless you use those.
 
 | Field | Where | Type |
 |---|---|---|
@@ -58,6 +60,9 @@ own yet, and no record has them unless you add them.
 | `meta.retry_count` | `meta` | integer ≥ 0 |
 | `meta.state_diff` | `meta` | object |
 | `meta.mcp.server`, `meta.mcp.tool` | `meta` | string |
+| `meta.tool`, `meta.tool_call_id`, `meta.provider`, `meta.agent_name`, `meta.agent_id`, `meta.response_model` | `meta` | string |
+| `meta.operation` | `meta` | `chat`, `text_completion` or `invoke_agent` |
+| `meta.input_messages`, `meta.output_messages` | `meta` | array (opt-in prompt/completion content) |
 
 `llm` is its own block, not part of `meta`, because cost and latency
 dashboards need stable names for it. A record that isn't an LLM call has no

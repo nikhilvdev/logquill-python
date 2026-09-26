@@ -27,6 +27,7 @@ for what's landed so far.
 - **Config from file/env** — `load_config(dict)`, `logger_from_file(path)` (JSON/YAML), `logger_from_env()` build a `Logger` from one config shape — see [Config](#config)
 - **Plugin pipeline** — `ContextPlugin`, `RedactPlugin` (by key), `PIIRedactPlugin` (by pattern), `SamplingPlugin` (with tail-based elevation), `TamperEvidentPlugin` (hash-chained logs), `TraceContextPlugin` (cross-service trace correlation), and `AlertingPlugin` (`SlackAlertPlugin`/`PagerDutyAlertPlugin`/`EmailAlertPlugin`, deduplicated) out of the box; a broken plugin can't crash logging; `.use()` also accepts a plain function, no subclassing required (see [Plugins](#plugins))
 - **Agentic & harness tracing** — `.child()` loggers, `RunPlugin`, `.thought()/.action()/.observation()/.decision()`, `with agent_log.span(...)`, and framework adapters — `LangChainAdapter` (`pip install logquill[langchain]`), `LangGraphAdapter` (`pip install logquill[langgraph]`, adds checkpoint interrupt/resume events on top), `CrewAIAdapter` (`pip install logquill[crewai]`), `LlamaIndexAdapter` (`pip install logquill[llamaindex]`), and `AutoGenAdapter` (`pip install logquill[autogen]`) — see [Agentic & harness tracing](#agentic--harness-tracing)
+- **LLM calls & OpenTelemetry** — `logger.llm_call(model=, tokens_in=, tokens_out=, cost_usd=, ...)` records a first-class `llm` block, `span(capture_state=...)` records what state changed, repeated tool calls get `meta.retry_count` automatically, and `OTLPTransport` (`pip install logquill[otel]`) exports it all as real OpenTelemetry spans named and attributed per the GenAI semantic conventions; `OTelLogsTransport` sends records as OTLP logs — see [LLM calls & OpenTelemetry](#llm-calls--opentelemetry)
 - **Non-blocking async dispatch** — `Logger(async_dispatch=True)` moves transport writes onto a background thread with a bounded queue and a configurable backpressure policy (`drop_oldest`/`drop_newest`/`block`); `flush()`/`flush_async()` and a `with_lambda`/`with_cloud_function`/`with_azure_function` decorator make serverless shutdown safe — see [Async dispatch & serverless safety](#async-dispatch--serverless-safety)
 - **Zero required runtime dependencies** — stdlib only; `aiohttp` (`logquill[http]`) is opt-in, for keep-alive HTTP delivery
 - **Typed throughout** — `mypy --strict` clean on the public API
@@ -816,6 +817,136 @@ architecture that no longer shares `EVENT_LOGGER_NAME` or any of these
 event classes; that's a real divergence, not just a detail, so it needs its
 own adapter rather than reusing this one. `autogen-core` is never imported
 unless you import `logquill.adapters.autogen` yourself.
+
+## LLM calls & OpenTelemetry
+
+**Recording an LLM call.** `logger.llm_call()` writes one record with the LLM
+call's numbers in their own `llm` block — fixed names and types, so a cost or
+latency dashboard can rely on them:
+
+```python
+from logquill import Logger
+
+logger = Logger("app.agent")
+
+record = logger.llm_call(
+    "chat",
+    model="example-model",
+    tokens_in=1200,
+    tokens_out=340,
+    cost_usd=0.0123,
+    latency_ms=2150.5,
+    finish_reason="stop",
+    provider="anthropic",  # extra keywords go in `meta`
+)
+
+assert record["llm"]["tokens_in"] == 1200
+assert record["meta"] == {"kind": "action", "provider": "anthropic"}
+```
+
+Leave out what you don't have; a value of the wrong type (a negative count, a
+string where a number belongs) is dropped with a warning rather than raising.
+Don't put prompt or completion text in `meta` unless you mean every transport
+to receive it.
+
+**What changed during a step.** `span(name, capture_state=...)` calls your
+function on entering and leaving the block and records what differs as
+`meta.state_diff` — only the keys that changed, deep-copied so in-place
+mutation is seen, and omitted if nothing changed:
+
+```python
+from logquill import CollectingTransport, Logger
+
+sink = CollectingTransport()
+logger = Logger("app.agent", transports=[sink])
+state = {"items": 1, "user": "ada"}
+
+with logger.span("add_item", capture_state=lambda: state):
+    state["items"] = 2
+
+assert sink.records[0]["meta"]["state_diff"] == {"before": {"items": 1}, "after": {"items": 2}}
+```
+
+`state_diff` lands in `meta`, so `PIIRedactPlugin` sees it; `RedactPlugin` only
+matches top-level keys, so don't capture secrets.
+
+**Retries.** An `.action()` that names its tool (`tool="search"`) is tracked:
+if the same call — same tool, same enclosing span, same `tool_call_id` if you
+give one — is reopened before it succeeded, the record gets `meta.retry_count`
+(1, 2, 3, ...). A successful `.observation(tool=...)` ends the chain, so a loop
+that legitimately calls one tool many times isn't reported as retries:
+
+```python
+from logquill import Logger
+
+logger = Logger("app.agent")
+
+first = logger.action("look it up", tool="search")
+logger.observation("timed out", tool="search", error="TimeoutError: slow")
+second = logger.action("look it up", tool="search")
+
+assert "retry_count" not in first["meta"]
+assert second["meta"]["retry_count"] == 1
+```
+
+**Exporting to OpenTelemetry.** `pip install logquill[otel]`, then attach
+`OTLPTransport`. It turns the records that describe work with a start and an
+end into real spans, with the ids, parents and timings the records carry:
+
+- a `span()` marked `operation="invoke_agent"` (or given an `agent_name`) is
+  `invoke_agent {agent}`; any other span keeps its own name,
+- an `.action()` naming its `tool` is `execute_tool {tool}`,
+- a record with an `llm` block is `chat {model}` with the model, token counts
+  and finish reason as the standard GenAI attributes.
+
+```python
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+from logquill import Logger, OTLPTransport, RunPlugin
+
+exporter = InMemorySpanExporter()  # in real use: leave `span_exporter` out and set `endpoint`
+logger = Logger(
+    "app.agent",
+    transports=[OTLPTransport(span_exporter=exporter, processor="simple")],
+    plugins=[RunPlugin()],
+)
+
+with logger.span("run", operation="invoke_agent", agent_name="planner"):
+    logger.llm_call("chat", model="example-model", tokens_in=1200, tokens_out=340, provider="anthropic")
+    logger.action("look it up", tool="search", duration_ms=40)
+logger.close()
+
+spans = {span.name: span for span in exporter.get_finished_spans()}
+assert set(spans) == {"invoke_agent planner", "chat example-model", "execute_tool search"}
+chat = spans["chat example-model"]
+assert chat.attributes["gen_ai.usage.input_tokens"] == 1200
+assert chat.parent.span_id == spans["invoke_agent planner"].context.span_id
+```
+
+To send to a collector, give it an endpoint instead:
+`OTLPTransport(endpoint="http://localhost:4318/v1/traces", service_name="my-agent")`.
+Export is batched off the calling thread. Records that aren't spans are
+ignored here; `OTelLogsTransport(endpoint=".../v1/logs")` sends every record
+as an OTLP log record — level as severity, `meta` as attributes, and the same
+trace and span ids, so a collector can join a log line to its span.
+
+Three things worth knowing:
+
+- **The attribute names are pinned to one release of the GenAI conventions**
+  (semantic-conventions 1.44.0) and live in a single file,
+  `logquill/semconv.py`. Those conventions are still marked *Development*
+  upstream and have already renamed attributes (`gen_ai.system` became
+  `gen_ai.provider.name`), so a future release is an edit to that file.
+  `semconv_version="legacy"` selects the older provider and token-count names
+  for a backend that hasn't caught up; `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental`
+  selects the latest. Old and new names are never emitted together.
+- **Prompt and completion text is never exported by default.** It's only
+  included — from `meta.input_messages` / `meta.output_messages`, as JSON — if
+  you pass `capture_content=True` or set
+  `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`.
+- Give records a `run_id` (`RunPlugin`) or a `trace_id` (`TraceContextPlugin`)
+  and one run is one trace. Without either, spans that name a parent still share
+  a trace with their siblings, but not with their grandparents.
 
 ## Async dispatch & serverless safety
 
