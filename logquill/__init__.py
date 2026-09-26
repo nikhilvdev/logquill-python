@@ -39,6 +39,8 @@ from logquill.transports.http_transport import HTTPTransport
 from logquill.transports.nosql.dynamodb_transport import DynamoDBTransport
 from logquill.transports.nosql.mongodb_transport import MongoDBTransport
 from logquill.transports.nosql.redis_transport import RedisTransport
+from logquill.transports.otel.logs_transport import OTelLogsTransport
+from logquill.transports.otel.otlp_transport import OTLPTransport
 from logquill.transports.queue.base_queue_transport import BaseQueueTransport
 from logquill.transports.queue.kafka_transport import KafkaTransport
 from logquill.transports.queue.pubsub_transport import PubSubTransport
@@ -86,6 +88,8 @@ __all__ = [
     "MongoDBTransport",
     "MySQLTransport",
     "NewRelicTransport",
+    "OTLPTransport",
+    "OTelLogsTransport",
     "OptLogger",
     "PIIRedactPlugin",
     "PagerDutyAlertPlugin",

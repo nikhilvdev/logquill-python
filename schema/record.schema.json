@@ -108,6 +108,45 @@
         "prev_hash": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
+        },
+        "tool": {
+          "type": "string",
+          "description": "Name of the tool an action called."
+        },
+        "tool_call_id": {
+          "type": "string",
+          "description": "Identifies one tool call across its retries."
+        },
+        "provider": {
+          "type": "string",
+          "description": "The LLM provider, e.g. openai, anthropic."
+        },
+        "agent_name": {
+          "type": "string",
+          "description": "Human-readable name of the agent."
+        },
+        "agent_id": {
+          "type": "string"
+        },
+        "operation": {
+          "enum": [
+            "chat",
+            "text_completion",
+            "invoke_agent"
+          ],
+          "description": "Overrides the operation inferred for OpenTelemetry export."
+        },
+        "response_model": {
+          "type": "string",
+          "description": "The model that actually answered, if it differs from llm.model."
+        },
+        "input_messages": {
+          "type": "array",
+          "description": "Opt-in prompt content; only exported to OpenTelemetry when content capture is on."
+        },
+        "output_messages": {
+          "type": "array",
+          "description": "Opt-in completion content."
         }
       }
     },

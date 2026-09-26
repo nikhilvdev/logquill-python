@@ -123,7 +123,7 @@ class TraceContextPlugin(Plugin):
     @staticmethod
     def _from_active_otel_span() -> str | None:
         try:
-            from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+            from opentelemetry import trace as otel_trace
         except ImportError:
             return None
         span = otel_trace.get_current_span()

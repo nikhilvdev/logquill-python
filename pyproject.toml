@@ -40,6 +40,11 @@ dependencies = []
 [project.optional-dependencies]
 http = ["aiohttp>=3.9"]
 apprise = ["apprise>=1.8"]
+otel = [
+    "opentelemetry-api>=1.39",
+    "opentelemetry-sdk>=1.39",
+    "opentelemetry-exporter-otlp-proto-http>=1.39",
+]
 postgres = ["psycopg2-binary>=2.9"]
 mysql = ["pymysql>=1.1"]
 mongodb = ["pymongo>=4.6"]
@@ -112,6 +117,10 @@ include = [
 line-length = 100
 target-version = "py310"
 
+[tool.ruff.lint.per-file-ignores]
+# Test fixtures read better as one record per line than wrapped to 100 columns.
+"tests/**" = ["E501"]
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
 # Importing `Callable`/`Sequence`/... from `typing` still works and is used
@@ -143,6 +152,13 @@ warn_unused_ignores = false
 [[tool.mypy.overrides]]
 module = ["apprise", "aiohttp"]
 ignore_missing_imports = true
+
+# OpenTelemetry is optional too, and is imported lazily; treating it as untyped
+# keeps `mypy --strict` giving the same answer with or without it installed.
+[[tool.mypy.overrides]]
+module = ["opentelemetry", "opentelemetry.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

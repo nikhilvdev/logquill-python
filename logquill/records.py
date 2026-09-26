@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, TypedDict, cast
 
 from logquill.levels import Level
+
+_logger = logging.getLogger("logquill")
 
 #: The record shape this version writes. Shared with logquill-js: a record
 #: carries it as `schema_version` so a reader can tell which shape it has.
@@ -131,3 +134,46 @@ def parse_record(raw: Mapping[str, Any]) -> LogRecord:
         raise ValueError(f"record field 'llm' must be an object, got {type(llm).__name__}")
 
     return cast(LogRecord, record)
+
+
+_LLM_INT_FIELDS = ("tokens_in", "tokens_out")
+_LLM_NUMBER_FIELDS = ("cost_usd", "latency_ms")
+_LLM_STR_FIELDS = ("model", "finish_reason")
+
+
+def build_llm_block(**fields: Any) -> LLMBlock | None:
+    """Assemble an `LLMBlock` from keyword fields, leaving out anything that is
+    `None` and anything that doesn't fit the contract (a negative count, a
+    string where a number belongs) — with a warning naming the field, since a
+    log call must not raise over a bad value, and a record that breaks the
+    schema is worse than one missing a field. Returns `None` if nothing is
+    left, so a record with no usable LLM data has no `llm` key at all."""
+    block: dict[str, Any] = {}
+    for name, value in fields.items():
+        if value is None:
+            continue
+        if name in _LLM_INT_FIELDS:
+            valid = isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        elif name in _LLM_NUMBER_FIELDS:
+            valid = isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0
+        elif name in _LLM_STR_FIELDS:
+            valid = isinstance(value, str)
+        else:
+            valid = False
+        if valid:
+            block[name] = value
+        else:
+            _logger.warning(
+                "llm_call: ignoring %s=%r — expected %s", name, value, _expected_llm_type(name)
+            )
+    return cast(LLMBlock, block) if block else None
+
+
+def _expected_llm_type(name: str) -> str:
+    if name in _LLM_INT_FIELDS:
+        return "a non-negative integer"
+    if name in _LLM_NUMBER_FIELDS:
+        return "a non-negative number"
+    if name in _LLM_STR_FIELDS:
+        return "a string"
+    return "one of model, tokens_in, tokens_out, cost_usd, latency_ms, finish_reason"
