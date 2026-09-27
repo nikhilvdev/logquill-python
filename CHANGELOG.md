@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Auto-instrumentation, an OpenAI Agents SDK adapter, and MCP trace propagation:
+  - `logquill.instrument.anthropic(logger)` / `.openai(logger)` / `.litellm(logger)`
+    patch the Anthropic, OpenAI, and litellm Python SDKs so every LLM call they
+    make anywhere in the process emits a `logger.llm_call(...)` — no call-site
+    changes. Each has a matching `.uninstrument()`, lives behind its own
+    optional extra (`logquill[instrument-anthropic]`, `[instrument-openai]`,
+    `[instrument-litellm]`), and is imported lazily: `import logquill.instrument`
+    never imports a provider SDK. Streaming calls are a documented gap in this
+    release — passed through untouched rather than partially instrumented.
+  - `OpenAIAgentsAdapter` (`pip install logquill[openai-agents]`) maps the
+    OpenAI Agents SDK's `RunHooks` the same way the existing adapters map their
+    frameworks: every agent activation (including a handoff's target) is its
+    own `invoke_agent` span, and `on_llm_end` becomes a real `.llm_call()` with
+    token usage, so `OTLPTransport` exports a full run — spans, tokens, cost —
+    with zero manual logging calls.
+  - `logquill.mcp` (`propagate()`/`inbound()`) propagates trace context over an
+    MCP request's `_meta` field and stamps `meta.mcp.*` on records logged while
+    handling one, with no dependency on the `mcp` package itself. A client's
+    `run_id` rides along informationally as `meta.mcp.run_id`; it never
+    overrides the handling process's own `RunPlugin` run id.
+  - The record contract gained `meta.mcp.run_id`.
+
 - LLM calls and OpenTelemetry export:
   - `logger.llm_call(model=, tokens_in=, tokens_out=, cost_usd=, latency_ms=,
     finish_reason=)` records an LLM call with its numbers in the record's
