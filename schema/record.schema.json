@@ -160,6 +160,10 @@
         },
         "tool": {
           "type": "string"
+        },
+        "run_id": {
+          "type": "string",
+          "description": "Informational: which client-side agent run triggered this MCP request. Never overrides this process's own run_id."
         }
       }
     },

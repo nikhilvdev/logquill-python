@@ -59,7 +59,7 @@ has them unless you use those.
 | `llm.cost_usd`, `llm.latency_ms` | `llm` block | number ≥ 0 |
 | `meta.retry_count` | `meta` | integer ≥ 0 |
 | `meta.state_diff` | `meta` | object |
-| `meta.mcp.server`, `meta.mcp.tool` | `meta` | string |
+| `meta.mcp.server`, `meta.mcp.tool`, `meta.mcp.run_id` | `meta` | string |
 | `meta.tool`, `meta.tool_call_id`, `meta.provider`, `meta.agent_name`, `meta.agent_id`, `meta.response_model` | `meta` | string |
 | `meta.operation` | `meta` | `chat`, `text_completion` or `invoke_agent` |
 | `meta.input_messages`, `meta.output_messages` | `meta` | array (opt-in prompt/completion content) |

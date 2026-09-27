@@ -26,8 +26,9 @@ for what's landed so far.
 - **Pluggable formatters** — `JSONFormatter` (default, machine-readable), `TextFormatter` (human-readable, for terminals), and `LogfmtFormatter` (`key=value`, the Heroku/Go convention); implement `format(record) -> str` for your own — see [Formatters](#formatters)
 - **Config from file/env** — `load_config(dict)`, `logger_from_file(path)` (JSON/YAML), `logger_from_env()` build a `Logger` from one config shape — see [Config](#config)
 - **Plugin pipeline** — `ContextPlugin`, `RedactPlugin` (by key), `PIIRedactPlugin` (by pattern), `SamplingPlugin` (with tail-based elevation), `TamperEvidentPlugin` (hash-chained logs), `TraceContextPlugin` (cross-service trace correlation), and `AlertingPlugin` (`SlackAlertPlugin`/`PagerDutyAlertPlugin`/`EmailAlertPlugin`, deduplicated) out of the box; a broken plugin can't crash logging; `.use()` also accepts a plain function, no subclassing required (see [Plugins](#plugins))
-- **Agentic & harness tracing** — `.child()` loggers, `RunPlugin`, `.thought()/.action()/.observation()/.decision()`, `with agent_log.span(...)`, and framework adapters — `LangChainAdapter` (`pip install logquill[langchain]`), `LangGraphAdapter` (`pip install logquill[langgraph]`, adds checkpoint interrupt/resume events on top), `CrewAIAdapter` (`pip install logquill[crewai]`), `LlamaIndexAdapter` (`pip install logquill[llamaindex]`), and `AutoGenAdapter` (`pip install logquill[autogen]`) — see [Agentic & harness tracing](#agentic--harness-tracing)
+- **Agentic & harness tracing** — `.child()` loggers, `RunPlugin`, `.thought()/.action()/.observation()/.decision()`, `with agent_log.span(...)`, and framework adapters — `LangChainAdapter` (`pip install logquill[langchain]`), `LangGraphAdapter` (`pip install logquill[langgraph]`, adds checkpoint interrupt/resume events on top), `CrewAIAdapter` (`pip install logquill[crewai]`), `LlamaIndexAdapter` (`pip install logquill[llamaindex]`), `AutoGenAdapter` (`pip install logquill[autogen]`), and `OpenAIAgentsAdapter` (`pip install logquill[openai-agents]`) — see [Agentic & harness tracing](#agentic--harness-tracing)
 - **LLM calls & OpenTelemetry** — `logger.llm_call(model=, tokens_in=, tokens_out=, cost_usd=, ...)` records a first-class `llm` block, `span(capture_state=...)` records what state changed, repeated tool calls get `meta.retry_count` automatically, and `OTLPTransport` (`pip install logquill[otel]`) exports it all as real OpenTelemetry spans named and attributed per the GenAI semantic conventions; `OTelLogsTransport` sends records as OTLP logs — see [LLM calls & OpenTelemetry](#llm-calls--opentelemetry)
+- **Auto-instrumentation & MCP** — `logquill.instrument.anthropic(logger)`/`.openai(logger)`/`.litellm(logger)` patch a provider SDK so every LLM call logs itself, no call-site changes; `OpenAIAgentsAdapter` covers the OpenAI Agents SDK; `logquill.mcp` propagates trace context over MCP requests and stamps `meta.mcp.*` — see [Auto-instrumentation and MCP](#auto-instrumentation-and-mcp)
 - **Non-blocking async dispatch** — `Logger(async_dispatch=True)` moves transport writes onto a background thread with a bounded queue and a configurable backpressure policy (`drop_oldest`/`drop_newest`/`block`); `flush()`/`flush_async()` and a `with_lambda`/`with_cloud_function`/`with_azure_function` decorator make serverless shutdown safe — see [Async dispatch & serverless safety](#async-dispatch--serverless-safety)
 - **Zero required runtime dependencies** — stdlib only; `aiohttp` (`logquill[http]`) is opt-in, for keep-alive HTTP delivery
 - **Typed throughout** — `mypy --strict` clean on the public API
@@ -695,6 +696,29 @@ LangChain's own `run_id`/`parent_run_id` are written directly onto
 field renaming, not translation. `langchain-core` is never imported unless
 you import `logquill.adapters.langchain` yourself.
 
+`OpenAIAgentsAdapter` maps the [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/)'s
+`RunHooks` the same way — pass an instance as `Runner.run(..., hooks=...)`:
+
+```bash
+pip install logquill[openai-agents]
+```
+
+```python
+from agents import Agent, Runner
+from logquill import Logger, RunPlugin
+from logquill.adapters.openai_agents import OpenAIAgentsAdapter
+
+log = Logger("app")
+hooks = OpenAIAgentsAdapter(log.child("agent").use(RunPlugin()))
+agent = Agent(name="assistant", instructions="...")
+result = await Runner.run(agent, "hello", hooks=hooks)
+```
+
+Every agent activation (including a handoff's target) gets its own
+`invoke_agent {agent.name}` span; `on_llm_end` becomes a real `.llm_call()`
+with token usage, so `OTLPTransport` exports the whole run with cost and
+token fields attached, with zero manual logging calls.
+
 ### LangGraph
 
 LangGraph nodes execute as ordinary LangChain `Runnable`s, so
@@ -947,6 +971,68 @@ Three things worth knowing:
 - Give records a `run_id` (`RunPlugin`) or a `trace_id` (`TraceContextPlugin`)
   and one run is one trace. Without either, spans that name a parent still share
   a trace with their siblings, but not with their grandparents.
+
+## Auto-instrumentation and MCP
+
+**Auto-instrumentation.** `logquill.instrument.<provider>(logger)` patches a
+provider SDK so every LLM call it makes anywhere in the process logs itself —
+no call-site changes, and no code path forgets to log. Each provider lives
+behind its own extra and is imported lazily; `import logquill.instrument`
+never imports a provider SDK:
+
+```bash
+pip install logquill[instrument-anthropic]   # or [instrument-openai] / [instrument-litellm]
+```
+
+```python
+import logquill.instrument as instrument
+from logquill import Logger
+
+logger = Logger("app")
+instrument.anthropic(logger)
+
+# unchanged call site — no logger, no llm_call(), nothing added here
+response = client.messages.create(model="...", max_tokens=100, messages=[...])
+
+instrument.anthropic.uninstrument()  # each instrumenter has a matching uninstrument()
+```
+
+`logquill.instrument.litellm` is the broadest one: since litellm itself fans
+out to 100+ providers behind one interface, instrumenting it covers all of
+them from this one call. Calling an instrumenter twice without an
+intervening `.uninstrument()` raises, so a call is never wrapped twice.
+**Streaming calls are a known, documented gap** in this release — a
+`stream=True` call passes through untouched rather than being partially
+instrumented; see each provider module's docstring
+(`logquill.instrument.anthropic`, `.openai`, `.litellm`).
+
+**MCP (Model Context Protocol).** `logquill.mcp` propagates trace context
+over an MCP request and stamps `meta.mcp.*` on records logged while handling
+one — with no dependency on the `mcp` package itself, since both sides just
+build or read a plain dict (exactly what an MCP client's `meta=` argument and
+a server's inbound `_meta` are):
+
+```python
+from logquill import Logger, TraceContextPlugin
+from logquill.mcp import inbound, propagate
+
+# client, before calling a tool:
+await session.call_tool("search", {"q": "..."}, meta=propagate(run_id=agent_run_id))
+
+# server, inside the tool handler:
+server_log = Logger("mcp.files", plugins=[TraceContextPlugin()])
+with inbound(ctx.request_context.meta, server="files", tool="search"):
+    server_log.info("handling search")  # meta.trace_id matches the client's own
+                                          # call, and meta.mcp = {"server": "files",
+                                          # "tool": "search", "run_id": agent_run_id}
+```
+
+`propagate()`'s keys are namespaced under `logquill/`, an unreserved `_meta`
+prefix per the MCP spec (reserved prefixes contain a
+`modelcontextprotocol`/`mcp` label). A client's `run_id` never overrides the
+server's own `RunPlugin` run id — it rides along informationally, under
+`meta.mcp.run_id`, since the server handling a tool call is its own run, not
+a continuation of the client's.
 
 ## Async dispatch & serverless safety
 

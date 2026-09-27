@@ -396,6 +396,23 @@
           "model": "m"
         }
       }
+    },
+    {
+      "name": "MCP fields with a client-side run_id",
+      "record": {
+        "schema_version": "2.0",
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "level": "INFO",
+        "logger": "mcp.files",
+        "message": "handling search",
+        "meta": {
+          "mcp": {
+            "server": "files",
+            "tool": "search",
+            "run_id": "run-1"
+          }
+        }
+      }
     }
   ],
   "invalid": [
@@ -898,6 +915,22 @@
         }
       },
       "why": "input_messages is an array"
+    },
+    {
+      "name": "mcp.run_id is a number",
+      "record": {
+        "schema_version": "2.0",
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "level": "INFO",
+        "logger": "a",
+        "message": "x",
+        "meta": {
+          "mcp": {
+            "run_id": 1
+          }
+        }
+      },
+      "why": "mcp.run_id is a string"
     }
   ],
   "legacy": [
