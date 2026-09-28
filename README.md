@@ -36,6 +36,7 @@ for what's landed so far.
 - **Cheap when idle, precise when it counts** — `logger.opt(lazy=True)` defers expensive `meta` values until a record will really be emitted, `logger.opt(depth=N)` reports the right caller from inside a wrapper, `logquill.disable(__name__)` silences a library's own logs by default, and queued records are flushed automatically at interpreter exit — see [Lazy values, caller depth & disabling a library](#lazy-values-caller-depth--disabling-a-library)
 - **Parse any log file** — `parse()` pulls structured fields out of a log file (LogQuill's own or a legacy format) with a regex, streaming line by line — see [Parsing log files](#parsing-log-files)
 - **CLI** — `logquill tail app.log --level=warn --json -f` for filtering/following a JSONL log file in local dev, no extra install — see [CLI](#cli)
+- **Local-first trace viewer** — `logquill trace <run_id> --file logs.jsonl` prints an annotated span tree (streamed, bounded memory at gigabyte scale); `logquill serve` runs a small offline web UI (stdlib only — run list, span tree/waterfall, search, level filter) reading JSONL or a `SQLiteTransport` database; `logquill dev` live-renders the current run as it happens — no account, nothing leaves your machine
 
 ## Install
 
@@ -1409,6 +1410,79 @@ colors) when writing to a terminal; pass `--no-color` to disable that, or
 `--json` to print each matching record as a single JSON line instead. A line
 that isn't valid JSON, or isn't a JSON object, is skipped with a warning on
 stderr rather than aborting the whole tail.
+
+### `logquill trace` — one run's span tree, from the command line
+
+`logquill trace <run_id> --file logs.jsonl` reconstructs and prints one
+agent run's span tree, annotated with each span's own duration and the
+token/cost totals of everything nested under it — everything a hosted trace
+UI shows you, from a plain JSONL file, no account or backend:
+
+```bash
+logquill trace run-4f2a --file logs.jsonl
+```
+
+```text
+└─ [INFO] run  (812.5ms, 1540→412 tok, $0.0187)
+   ├─ [INFO] plan the work
+   ├─ [INFO] step  (250.0ms, 1200→340 tok, $0.0123)
+   │  └─ [INFO] chat  (1200→340 tok, $0.0123)
+   └─ [INFO] look it up  (40.0ms)
+```
+
+It **streams** the file line by line — reconstructing one run out of a
+multi-gigabyte log file costs memory proportional to that run, not the file
+(tested at gigabyte scale in `benchmarks/test_trace_memory.py`). `--json`
+prints the same tree as nested `{record, rollup, children}` objects instead,
+for feeding into another tool.
+
+### `logquill serve` — a local, offline trace viewer
+
+`logquill serve --file logs.jsonl` runs a small web UI, entirely on the
+stdlib (`http.server`) — no new dependency, no account, and nothing leaves
+your machine:
+
+```bash
+logquill serve --file logs.jsonl
+# logquill serve: 12 run(s) found in logs.jsonl
+# logquill serve: listening on http://127.0.0.1:52341/ — Ctrl+C to stop
+```
+
+Open the printed URL: a run list on the left (record count, token/cost
+totals, an error badge), and a combined span-tree/waterfall view for
+whichever run you click — indentation shows nesting, bar position and width
+show timing. Search and the level filter both work inside a selected run
+(client-side, instant) and, with nothing selected, across every run at once
+(via `/api/search`, still streamed rather than loaded into memory).
+
+`--db logs.sqlite` reads from a `SQLiteTransport`-written database instead of
+a JSONL file. One limitation, inherent to that transport's fixed table
+schema: it doesn't store the `llm` block, so runs served from SQLite show no
+token/cost annotations even if the original records had them — trace from
+the JSONL file (or a transport that does keep `llm`) to see those.
+
+`logquill serve` computes the run list once at startup by streaming through
+the source; it's a snapshot, not a live tail — restart it to pick up runs
+logged after it started.
+
+### `logquill dev` — watch an agent run live
+
+`logquill dev logs.jsonl` follows a log file like `tail -f`, but redraws the
+current run's span tree — colorized, screen cleared between redraws on a
+terminal — every time a new record for it arrives, instead of printing flat
+lines:
+
+```bash
+logquill dev logs.jsonl
+```
+
+It tracks whichever run's records have arrived most recently by default, so
+the view follows an agent from one run to the next without restarting; pass
+`--run-id` to pin it to one run instead. `--backlog N` (default 5000) caps
+how much of the file's *existing* content seeds the very first render, so
+pointing it at a large pre-existing file doesn't stall before the first draw
+— once running, though, a `dev` session keeps its own growing record list in
+memory for as long as it runs, unlike `trace`'s bounded streaming.
 
 ## API reference
 

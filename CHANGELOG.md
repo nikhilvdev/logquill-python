@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Local-first trace viewer:
+  - `logquill trace <run_id> --file logs.jsonl` reconstructs and prints one
+    agent run's span tree, annotated with each span's own duration and the
+    token/cost totals rolled up from everything nested under it. It streams
+    the file line by line, so tracing one run out of a multi-gigabyte log
+    costs memory proportional to that run, not the file (a gigabyte-scale
+    test asserts this). `--json` prints the same tree as nested data instead.
+  - `logquill serve --file logs.jsonl` (or `--db logs.sqlite` for a
+    `SQLiteTransport` database) runs a small local web UI — run list, a
+    combined span-tree/waterfall view, search, and a level filter — built
+    entirely on the stdlib (`http.server`, `sqlite3`): no new dependency, no
+    account, nothing leaves the machine. Reading from a SQLite database never
+    shows token/cost annotations, since that transport's fixed schema doesn't
+    store the `llm` block.
+  - `logquill dev logs.jsonl` follows a file like `tail -f`, but live-renders
+    the current run's span tree (colorized, screen-cleared between redraws)
+    instead of flat lines, following whichever run is most recently active
+    unless `--run-id` pins it to one.
 - Auto-instrumentation, an OpenAI Agents SDK adapter, and MCP trace propagation:
   - `logquill.instrument.anthropic(logger)` / `.openai(logger)` / `.litellm(logger)`
     patch the Anthropic, OpenAI, and litellm Python SDKs so every LLM call they
