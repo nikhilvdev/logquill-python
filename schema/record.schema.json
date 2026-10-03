@@ -92,7 +92,7 @@
         },
         "state_diff": {
           "type": "object",
-          "description": "State captured before and after a span."
+          "description": "State captured before and after a span, governed by Logger(content_policy=...) the same as input_messages."
         },
         "mcp": {
           "$ref": "#/$defs/mcp"
@@ -103,11 +103,13 @@
         },
         "hash": {
           "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 hex digest over this record's content plus prev_hash."
         },
         "prev_hash": {
           "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "The previous record's hash in a TamperEvidentPlugin chain."
         },
         "tool": {
           "type": "string",
@@ -142,11 +144,17 @@
         },
         "input_messages": {
           "type": "array",
-          "description": "Opt-in prompt content; only exported to OpenTelemetry when content capture is on."
+          "description": "Prompt content governed by Logger(content_policy=...) — off by default; only exported to OpenTelemetry when OTLPTransport's capture_content is on."
         },
         "output_messages": {
           "type": "array",
-          "description": "Opt-in completion content."
+          "description": "Completion content, governed the same way as input_messages."
+        },
+        "tool_arguments": {
+          "description": "A tool call's arguments — any JSON value, governed by Logger(content_policy=...) the same as input_messages."
+        },
+        "tool_result": {
+          "description": "A tool call's result — any JSON value, governed by Logger(content_policy=...) the same as input_messages."
         }
       }
     },

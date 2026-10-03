@@ -1,4 +1,5 @@
 from logquill.adapters.base import LogQuillAdapter
+from logquill.audit import AuditLogger
 from logquill.config import load_config, logger_from_env, logger_from_file
 from logquill.context import bind_context, current_context
 from logquill.exceptions import format_exc_info
@@ -20,8 +21,16 @@ from logquill.plugins.redact_plugin import RedactPlugin
 from logquill.plugins.run_plugin import RunPlugin
 from logquill.plugins.sampling_plugin import SamplingPlugin
 from logquill.plugins.slack_alert_plugin import SlackAlertPlugin
-from logquill.plugins.tamper_evident_plugin import TamperEvidentPlugin
+from logquill.plugins.tamper_evident_plugin import (
+    TamperEvidentPlugin,
+    VerificationResult,
+    sign_head,
+    verify_chain_detailed,
+    verify_head_signature,
+    verify_signed_chain,
+)
 from logquill.plugins.trace_context_plugin import TraceContextPlugin
+from logquill.privacy import CONTENT_FIELDS, FIELD_CLASSES, ContentCapturePolicy, FieldClass
 from logquill.records import SCHEMA_VERSION, LLMBlock, LogRecord, parse_record
 from logquill.serverless import with_azure_function, with_cloud_function, with_lambda
 from logquill.toggle import disable, enable, is_enabled
@@ -60,18 +69,23 @@ __all__ = [
     "AppriseAlertPlugin",
     "AppInsightsTransport",
     "AsyncWorker",
+    "AuditLogger",
     "BaseQueueTransport",
     "BaseSQLTransport",
     "BatchingTransport",
     "CloudLoggingTransport",
     "CloudWatchTransport",
     "CollectingTransport",
+    "CONTENT_FIELDS",
     "ConsoleTransport",
+    "ContentCapturePolicy",
     "ContextPlugin",
     "DatadogTransport",
     "DynamoDBTransport",
     "ElasticsearchTransport",
     "EmailAlertPlugin",
+    "FIELD_CLASSES",
+    "FieldClass",
     "FileTransport",
     "Formatter",
     "FunctionPlugin",
@@ -114,6 +128,7 @@ __all__ = [
     "TextFormatter",
     "TraceContextPlugin",
     "Transport",
+    "VerificationResult",
     "bind_context",
     "current_context",
     "disable",
@@ -127,6 +142,10 @@ __all__ = [
     "parse_level",
     "parse_logfmt",
     "parse_record",
+    "sign_head",
+    "verify_chain_detailed",
+    "verify_head_signature",
+    "verify_signed_chain",
     "with_azure_function",
     "with_cloud_function",
     "with_lambda",

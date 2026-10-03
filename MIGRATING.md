@@ -62,7 +62,9 @@ has them unless you use those.
 | `meta.mcp.server`, `meta.mcp.tool`, `meta.mcp.run_id` | `meta` | string |
 | `meta.tool`, `meta.tool_call_id`, `meta.provider`, `meta.agent_name`, `meta.agent_id`, `meta.response_model` | `meta` | string |
 | `meta.operation` | `meta` | `chat`, `text_completion` or `invoke_agent` |
-| `meta.input_messages`, `meta.output_messages` | `meta` | array (opt-in prompt/completion content) |
+| `meta.input_messages`, `meta.output_messages` | `meta` | array |
+| `meta.system_instructions` | `meta` | array |
+| `meta.tool_arguments`, `meta.tool_result` | `meta` | any JSON value |
 
 `llm` is its own block, not part of `meta`, because cost and latency
 dashboards need stable names for it. A record that isn't an LLM call has no
@@ -85,3 +87,20 @@ and `logquill` on npm both test against.
 - If a transport of yours rebuilds a record from its five 1.x fields, copy the
   record instead (`{**record, "meta": new_meta}`) so `schema_version` and `llm`
   aren't dropped.
+
+## 6. Content capture is off by default
+
+The fields above that can carry a prompt, a completion, or a tool's
+arguments/result — `input_messages`, `output_messages`,
+`system_instructions`, `tool_arguments`, `tool_result`, and `state_diff` —
+are now governed by a per-logger content-capture policy, `Logger(
+content_policy="off" | "hash" | "truncate" | "full")`, **off by default**.
+If you were relying on these fields reaching a transport as given, add
+`content_policy="full"` explicitly. `AuditLogger` (new in this release) also
+defaults to `"off"`.
+
+`RedactPlugin` also gained `classes=` (e.g. `RedactPlugin(classes=
+["secret", "content"])`), redacting by field classification instead of only
+by exact key name — see `logquill.privacy.FIELD_CLASSES`. Existing
+`RedactPlugin()` calls with no arguments are unaffected: the default key set
+is unchanged, just now sourced from that same classification.

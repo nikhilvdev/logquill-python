@@ -24,7 +24,16 @@ from logquill.plugins.trace_context_plugin import (  # noqa: E402
 def _setup(**kwargs: Any) -> tuple[Logger, OTLPTransport, InMemorySpanExporter]:
     exporter = InMemorySpanExporter()
     transport = OTLPTransport(span_exporter=exporter, processor="simple", **kwargs)
-    logger = Logger("app.agent", level="TRACE", transports=[transport], plugins=[RunPlugin()])
+    # content_policy="full": these tests are about what OTLPTransport does
+    # with whatever is in meta, not the Logger-level privacy policy that
+    # governs content fields by default (see tests/test_privacy.py).
+    logger = Logger(
+        "app.agent",
+        level="TRACE",
+        transports=[transport],
+        plugins=[RunPlugin()],
+        content_policy="full",
+    )
     return logger, transport, exporter
 
 

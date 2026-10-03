@@ -11,11 +11,32 @@ from logquill.records import LogRecord
 #: positives (a random 9-digit number) and false negatives (anything that
 #: doesn't look like these shapes) are expected. Override via `patterns=`
 #: for anything stricter.
+#:
+#: The API-key/secret entries below aren't "PII" in the usual sense —
+#: they're here because they're exactly the other thing a stray value in an
+#: LLM prompt, a tool argument, or a log line can leak, and the same
+#: scan-every-value-regardless-of-key mechanism applies. Each is a
+#: well-known provider's own fixed prefix/shape, chosen specifically to
+#: keep the false-positive rate low (unlike a generic "looks random" check,
+#: which would flag plenty of non-secrets).
 DEFAULT_PII_PATTERNS: dict[str, re.Pattern[str]] = {
     "email": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
     "ssn": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
     "credit_card": re.compile(r"\b(?:\d[ -]?){13,16}\b"),
     "phone": re.compile(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"),
+    "openai_api_key": re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b"),
+    "anthropic_api_key": re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b"),
+    "aws_access_key_id": re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
+    "github_token": re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b"),
+    "slack_token": re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+    "jwt": re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
+    "private_key_block": re.compile(
+        r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----"
+        r".*?"
+        r"-----END (?:RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----",
+        re.DOTALL,
+    ),
+    "bearer_token": re.compile(r"\bBearer\s+[A-Za-z0-9\-_.]{20,}\b"),
 }
 
 _MAX_DEPTH = 50
@@ -115,9 +136,41 @@ class PIIRedactPlugin(Plugin):
     def _redact_text(self, text: str) -> str:
         if self.use_presidio:
             return self._redact_with_presidio(text)
-        for pattern in self.patterns.values():
-            text = pattern.sub(self.replacement, text)
-        return text
+
+        # Found independently per pattern, over the *original* text — not
+        # applied as a sequence of in-place substitutions. Doing it
+        # in-place would let an earlier pattern's replacement text corrupt a
+        # later pattern's match (e.g. a phone-shaped digit run inside a
+        # Slack token: redacting the digits first leaves the token only
+        # half-redacted, worse than catching it correctly or not at all).
+        spans = [
+            (match.start(), match.end())
+            for pattern in self.patterns.values()
+            for match in pattern.finditer(text)
+        ]
+        if not spans:
+            return text
+
+        # Leftmost first, longest first on a tie, then take non-overlapping
+        # spans in that order — the standard "resolve overlapping matches"
+        # sweep, so two patterns matching the same stretch of text redact it
+        # once, as the longer/more specific match, not twice or partially.
+        spans.sort(key=lambda span: (span[0], -span[1]))
+        chosen: list[tuple[int, int]] = []
+        last_end = -1
+        for start, end in spans:
+            if start >= last_end:
+                chosen.append((start, end))
+                last_end = end
+
+        pieces = []
+        cursor = 0
+        for start, end in chosen:
+            pieces.append(text[cursor:start])
+            pieces.append(self.replacement)
+            cursor = end
+        pieces.append(text[cursor:])
+        return "".join(pieces)
 
     def _redact_with_presidio(self, text: str) -> str:
         results = self._analyzer.analyze(

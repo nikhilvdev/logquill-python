@@ -413,6 +413,26 @@
           }
         }
       }
+    },
+    {
+      "name": "tool call with arguments and result",
+      "record": {
+        "schema_version": "2.0",
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "level": "INFO",
+        "logger": "app.agent",
+        "message": "search",
+        "meta": {
+          "kind": "action",
+          "tool": "search",
+          "tool_arguments": {
+            "q": "x"
+          },
+          "tool_result": {
+            "ok": true
+          }
+        }
+      }
     }
   ],
   "invalid": [
@@ -931,6 +951,21 @@
         }
       },
       "why": "mcp.run_id is a string"
+    },
+    {
+      "name": "tool_arguments at the top level, not meta",
+      "record": {
+        "schema_version": "2.0",
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "level": "INFO",
+        "logger": "app.agent",
+        "message": "search",
+        "meta": {},
+        "tool_arguments": {
+          "q": "x"
+        }
+      },
+      "why": "tool_arguments lives in meta, not the top level"
     }
   ],
   "legacy": [

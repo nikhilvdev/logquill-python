@@ -4,6 +4,43 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Privacy, content policy, and an audit trail:
+  - Every `Logger` now has a `content_policy` (`"off"` by default \| `"hash"`
+    \| `"truncate"` \| `"full"`), governing the content fields an LLM call or
+    tool call can carry (`meta.input_messages`/`output_messages`/
+    `system_instructions`/`tool_arguments`/`tool_result`/`state_diff`).
+    Applied before any plugin or transport ever sees the record, so a seeded
+    secret inside a prompt never reaches a transport unless you opt in.
+    `.child()` inherits the parent's policy.
+  - Field classification (`logquill.privacy.FIELD_CLASSES`: `secret` \|
+    `pii` \| `content`) lets a redaction rule target a class instead of
+    listing keys by name: `RedactPlugin(classes=["secret", "content"])`.
+    `RedactPlugin`'s existing default key set is unchanged, now sourced from
+    the same registry.
+  - `PIIRedactPlugin` gained patterns for well-known API-key/secret shapes —
+    OpenAI/Anthropic keys, AWS access key IDs, GitHub/Slack tokens, JWTs,
+    full PEM private-key blocks, generic `Bearer` tokens — alongside its
+    existing email/SSN/credit-card/phone patterns. Also fixed: overlapping
+    matches between two patterns (e.g. a phone-shaped digit run inside a
+    Slack token) used to redact in a sequence of independent substitutions,
+    which could leave a value only half-redacted; matches are now resolved
+    across all patterns in one pass before anything is replaced.
+  - `TamperEvidentPlugin` gained `.head_hash`/`.sign_head(key)` and the
+    module-level `verify_chain_detailed`/`verify_signed_chain`/`sign_head`/
+    `verify_head_signature`. Hash-chaining alone can't catch a log file
+    being truncated — the remaining chain is perfectly self-consistent, just
+    shorter — so signing the chain's current head and checking it
+    separately closes that gap. `logquill verify <file>` (optionally
+    `--sign-key`/`--signature`) wraps this from the command line, reporting
+    where and why a chain broke.
+  - `AuditLogger` bundles `RedactPlugin`, `PIIRedactPlugin`, and
+    `TamperEvidentPlugin` with content capture off by default — the
+    technical controls an audit trail commonly needs, in one call. Its
+    `.child()` shares the parent's hash chain rather than starting a second,
+    interleaved one. Same scope-honesty note as the rest of the plugin
+    pipeline: none of this is a compliance guarantee on its own.
+  - The record contract gained `meta.tool_arguments`/`meta.tool_result`,
+    and documents which fields the content-capture policy governs.
 - Local-first trace viewer:
   - `logquill trace <run_id> --file logs.jsonl` reconstructs and prints one
     agent run's span tree, annotated with each span's own duration and the
