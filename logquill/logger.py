@@ -11,6 +11,7 @@ from logquill.levels import Level, parse_level
 from logquill.opt import OptLogger, caller_info, resolve_lazy
 from logquill.plugins.context_plugin import ContextPlugin
 from logquill.plugins.plugin import FunctionPlugin, MiddlewareFunc, Plugin
+from logquill.privacy import ContentCapturePolicy, apply_content_policy, parse_content_policy
 from logquill.records import LLMBlock, LogRecord, build_llm_block, create_record
 from logquill.retry import RetryTracker
 from logquill.span import SpanContext, current_span_id
@@ -40,6 +41,7 @@ class Logger:
         max_queue_size: int = 10_000,
         backpressure: BackpressurePolicy = "drop_oldest",
         flush_at_exit: bool = True,
+        content_policy: ContentCapturePolicy | str = "off",
     ) -> None:
         """`async_dispatch=True` moves per-record transport writes (and the
         `after_log` plugin hooks that follow them) onto a background thread,
@@ -61,9 +63,24 @@ class Logger:
         `sys.exit()`, an unhandled exception) but not when the process is
         killed outright (`SIGKILL`, `os._exit()`, or `SIGTERM` with no
         handler installed) — handle `SIGTERM` and call `close()` for that.
+
+        `content_policy` governs the content fields — an LLM call's prompt/
+        completion, a tool call's arguments/result, a span's captured state
+        (see `logquill.privacy.CONTENT_FIELDS`) — **`"off"` by default**:
+        every call site, this logger's own plugins, and every transport
+        never see the raw value unless you choose otherwise. `"hash"`
+        replaces it with a stable digest (same content, same hash, so two
+        records can be confirmed to share one without exposing it);
+        `"truncate"` keeps the first `logquill.privacy.TRUNCATE_CHARS`
+        characters; `"full"` passes it through. Applied before any plugin
+        sees the record, so no plugin — not even a custom one — can
+        override it; see `logquill.privacy` for the full explanation and
+        `AuditLogger` for a profile that bundles this with the other
+        privacy/integrity controls.
         """
         self.name = name
         self._level = parse_level(level)
+        self.content_policy: ContentCapturePolicy = parse_content_policy(content_policy)
         self.transports: list[Transport] = list(transports) if transports else []
         self.plugins: list[Plugin] = []
         for plugin in plugins or []:
@@ -109,8 +126,14 @@ class Logger:
         a child can `.use(RunPlugin())` without attaching it to the
         parent's pipeline too. Any `fixed_meta` given is injected into
         every record the child produces, via an internal `ContextPlugin`.
+        Inherits this logger's `content_policy`.
         """
-        child_logger = Logger(f"{self.name}.{name}", level=self._level, transports=self.transports)
+        child_logger = Logger(
+            f"{self.name}.{name}",
+            level=self._level,
+            transports=self.transports,
+            content_policy=self.content_policy,
+        )
         if fixed_meta:
             child_logger.use(ContextPlugin(**fixed_meta))
         # Share the parent's worker (if any) rather than spinning up a second
@@ -282,6 +305,8 @@ class Logger:
         parent_span_id = current_span_id()
         if parent_span_id is not None:
             record["meta"].setdefault("parent_span_id", parent_span_id)
+
+        apply_content_policy(record["meta"], self.content_policy)
 
         for plugin in self.plugins:
             try:

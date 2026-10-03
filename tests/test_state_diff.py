@@ -8,7 +8,10 @@ from logquill.transports.transport import CollectingTransport
 
 def _logger() -> tuple[Logger, CollectingTransport]:
     sink = CollectingTransport()
-    return Logger("app.agent", transports=[sink]), sink
+    # content_policy="full": these tests are about capture_state's diffing
+    # logic, not the privacy policy that governs meta.state_diff's visibility
+    # by default (see tests/test_privacy.py for that).
+    return Logger("app.agent", transports=[sink], content_policy="full"), sink
 
 
 def _span_meta(sink: CollectingTransport) -> dict[str, Any]:

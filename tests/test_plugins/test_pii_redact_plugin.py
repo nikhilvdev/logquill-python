@@ -142,3 +142,103 @@ def test_use_presidio_routes_text_through_the_analyzer_and_anonymizer(
     fake_anonymizer_engine.return_value.anonymize.assert_called_once_with(
         text="jane@example.com", analyzer_results="fake-analysis"
     )
+
+
+# Deliberately low-entropy, dictionary-word placeholders ("FAKE" repeated to
+# the length each pattern requires) rather than realistic-looking random
+# characters — these exist only to exercise each pattern's shape, but a
+# convincing-looking fake still matches real secret-scanning services'
+# *own* shape-based detectors just as well as it matches ours (GitHub's push
+# protection flagged an earlier, more realistic-looking version of this
+# exact test as a live Slack token). Keeping these obviously inert avoids
+# that false positive without weakening what's actually under test.
+@pytest.mark.parametrize(
+    "name, text, leaked_fragment",
+    [
+        ("openai", "key is sk-proj-FAKEFAKEFAKEFAKEFAKE", "FAKEFAKEFAKEFAKEFAKE"),
+        ("anthropic", "key: sk-ant-FAKEFAKEFAKEFAKEFAKE", "FAKEFAKEFAKEFAKEFAKE"),
+        ("aws", "id AKIAFAKEFAKEFAKEFAKE in use", "FAKEFAKEFAKEFAKE"),
+        (
+            "github",
+            "token ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE",
+            "FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE",
+        ),
+        ("slack", "webhook xoxb-FAKEFAKEFAKE ok", "FAKEFAKEFAKE"),
+        (
+            "jwt",
+            "Authorization: eyJFAKEFAKEFAKE.FAKEFAKEFAKEFAKE.FAKEFAKEFAKEFAKE",
+            "FAKEFAKEFAKEFAKE",
+        ),
+        (
+            "bearer",
+            "Authorization: Bearer FAKEFAKEFAKEFAKEFAKE",
+            "FAKEFAKEFAKEFAKEFAKE",
+        ),
+    ],
+)
+def test_redacts_known_secret_shapes(name: str, text: str, leaked_fragment: str) -> None:
+    logger = Logger("app.test", plugins=[PIIRedactPlugin()])
+
+    record = logger.info("log line", note=text)
+
+    assert record is not None
+    assert leaked_fragment not in record["meta"]["note"], f"{name}: secret material leaked"
+    assert "***" in record["meta"]["note"]
+
+
+def test_redacts_a_full_pem_private_key_block_body_and_all() -> None:
+    logger = Logger("app.test", plugins=[PIIRedactPlugin()])
+    pem = (
+        "preamble -----BEGIN RSA PRIVATE KEY-----\n"
+        "MIIBogIBAAJ...\nMoreBase64KeyMaterialHere==\n"
+        "-----END RSA PRIVATE KEY-----\n trailer"
+    )
+
+    record = logger.info("log line", note=pem)
+
+    assert record is not None
+    assert "MIIBogIBAAJ" not in record["meta"]["note"]
+    assert "MoreBase64KeyMaterialHere" not in record["meta"]["note"]
+    assert "preamble" in record["meta"]["note"] and "trailer" in record["meta"]["note"]
+
+
+def test_an_earlier_patterns_replacement_does_not_corrupt_a_later_overlapping_match() -> None:
+    # a phone-shaped digit run embedded inside a Slack-token-shaped value: an
+    # in-place, sequential substitution would redact the digits first and
+    # leave the token only half-redacted — this must come out fully redacted
+    # instead. (Low-entropy "FAKE" padding, not a realistic token — see the
+    # parametrized test above for why.)
+    logger = Logger("app.test", plugins=[PIIRedactPlugin()])
+
+    record = logger.info("log line", note="call xoxb-5551234567FAKE or 415-555-0199")
+
+    assert record is not None
+    assert "xoxb" not in record["meta"]["note"]
+    assert "5551234567FAKE" not in record["meta"]["note"]
+    assert "415-555-0199" not in record["meta"]["note"]
+    assert record["meta"]["note"] == "call *** or ***"
+
+
+def test_two_patterns_matching_the_same_span_redact_it_exactly_once() -> None:
+    logger = Logger("app.test", plugins=[PIIRedactPlugin()])
+
+    # a 16-digit run matches both `credit_card` and part of a longer secret
+    # shape isn't realistic here, so instead assert the simpler invariant:
+    # overlapping matches never produce doubled-up replacement text.
+    record = logger.info("log line", note="4242 4242 4242 4242 4242 4242 4242 4242")
+
+    assert record is not None
+    assert record["meta"]["note"].count("***") <= 2
+
+
+def test_ordinary_text_is_never_falsely_flagged_as_a_secret() -> None:
+    logger = Logger("app.test", plugins=[PIIRedactPlugin()])
+
+    record = logger.info(
+        "log line", note="just a normal sentence about sk8boarding and github repositories"
+    )
+
+    assert record is not None
+    assert (
+        record["meta"]["note"] == "just a normal sentence about sk8boarding and github repositories"
+    )

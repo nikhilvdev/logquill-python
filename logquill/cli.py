@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import io
 import json
 import sys
 import time
@@ -12,6 +13,7 @@ from typing import IO, Any, Callable, Sequence
 
 from logquill.formatters import format_text
 from logquill.levels import Level, parse_level
+from logquill.plugins.tamper_evident_plugin import verify_chain_detailed, verify_signed_chain
 from logquill.trace_tree import build_trace, render_tree
 from logquill.webui import JSONLSource, RecordSource, SQLiteSource, TraceViewerServer
 
@@ -125,6 +127,25 @@ def build_parser() -> argparse.ArgumentParser:
         default=5000,
         metavar="N",
         help="At most this many existing lines seed the initial view (default: 5000).",
+    )
+
+    verify_parser = subparsers.add_parser(
+        "verify",
+        help="Check a TamperEvidentPlugin-written JSONL log file's hash chain.",
+    )
+    verify_parser.add_argument("file", help="Path to a LogQuill JSONL log file.")
+    verify_parser.add_argument(
+        "--sign-key",
+        metavar="HEX",
+        default=None,
+        help="Hex-encoded key, with --signature: also check the chain's head against a "
+        "signature taken with TamperEvidentPlugin.sign_head/AuditLogger.sign_head.",
+    )
+    verify_parser.add_argument(
+        "--signature",
+        metavar="HEX",
+        default=None,
+        help="Hex-encoded signature to check against, with --sign-key.",
     )
     return parser
 
@@ -439,6 +460,42 @@ def _run_dev(
     return 0
 
 
+def _run_verify(args: argparse.Namespace, *, out: IO[str]) -> int:
+    path = Path(args.file)
+    if not path.exists():
+        out.write(f"logquill verify: no such file: {args.file}\n")
+        return 1
+
+    if bool(args.sign_key) != bool(args.signature):
+        out.write("logquill verify: --sign-key and --signature must be given together\n")
+        return 1
+
+    records = _iter_records(path, warn_stream=io.StringIO())
+    if args.sign_key:
+        try:
+            key = bytes.fromhex(args.sign_key)
+        except ValueError:
+            out.write("logquill verify: --sign-key must be hex-encoded\n")
+            return 1
+        result = verify_signed_chain(records, key=key, signature=args.signature)
+    else:
+        result = verify_chain_detailed(records)
+
+    if result.ok:
+        out.write(
+            f"logquill verify: OK — {result.records_checked} record(s) verified in {args.file}\n"
+        )
+        if result.head_hash is not None:
+            out.write(f"logquill verify: chain head is {result.head_hash}\n")
+        return 0
+
+    out.write(
+        f"logquill verify: FAILED — {result.reason} (at record {result.broken_at} of "
+        f"{result.records_checked} checked) in {args.file}\n"
+    )
+    return 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """The `logquill` console-script entry point: parses `argv` (defaulting
     to `sys.argv`) and dispatches to the matching subcommand, returning the
@@ -454,6 +511,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "dev":
         return _run_dev(args, out=sys.stdout, warn_stream=sys.stderr)
+
+    if args.command == "verify":
+        return _run_verify(args, out=sys.stdout)
 
     if args.command != "tail":
         parser.error(f"Unknown command: {args.command}")

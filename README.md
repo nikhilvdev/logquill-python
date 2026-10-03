@@ -535,10 +535,25 @@ logger.info("support ticket", notes="reach me at jane@example.com, ssn 123-45-67
 ```
 
 Detection is regex-based by default — fast, dependency-free, matched on shape
-rather than meaning. For fuzzier ML-based detection instead, pass
-`use_presidio=True` (`pip install logquill[presidio]`) to route values
-through Microsoft Presidio's analyzer/anonymizer; Presidio stays a real,
-opt-in dependency, never a default one.
+rather than meaning. Beyond PII, the same scan also catches well-known
+API-key/secret shapes wherever they appear — OpenAI/Anthropic keys, AWS
+access key IDs, GitHub/Slack tokens, JWTs, PEM private-key blocks (the whole
+block, not just the `BEGIN` line), and generic `Bearer` tokens — each a
+provider's own fixed prefix or structure, chosen to keep false positives low.
+For fuzzier ML-based detection instead, pass `use_presidio=True` (`pip
+install logquill[presidio]`) to route values through Microsoft Presidio's
+analyzer/anonymizer; Presidio stays a real, opt-in dependency, never a
+default one.
+
+`RedactPlugin` can also target a **field classification**
+(`logquill.privacy.FIELD_CLASSES`: `secret` \| `pii` \| `content`) instead of
+listing key names one by one:
+
+```python
+from logquill import RedactPlugin
+
+RedactPlugin(keys=(), classes=["secret"])  # exactly today's default key set, by class
+```
 
 ### Tamper-evident logs
 
@@ -557,6 +572,89 @@ assert TamperEvidentPlugin.verify_chain(records) is True
 
 records[1]["message"] = "tampered"  # simulate an edited log line
 assert TamperEvidentPlugin.verify_chain(records) is False
+```
+
+`logquill verify <file>` wraps the same check for a JSONL file on disk,
+reporting *where* and *why* it broke:
+
+```bash
+logquill verify app.log
+# logquill verify: OK — 142 record(s) verified in app.log
+# logquill verify: chain head is 9f1c...e03a
+```
+
+Hash-chaining alone can't catch a file being **truncated** — delete the last
+few lines and what remains is still perfectly self-consistent, just shorter.
+Signing the chain's current head, and keeping that signature somewhere other
+than the log file itself, catches that too:
+
+```python
+from logquill import Logger, TamperEvidentPlugin, verify_signed_chain
+
+tamper = TamperEvidentPlugin()
+logger = Logger("app", plugins=[tamper])
+records = [logger.info(f"step {i}") for i in range(3)]
+
+signature = tamper.sign_head(b"a-key-you-keep-somewhere-else")  # not in this file
+
+assert verify_signed_chain(records, key=b"a-key-you-keep-somewhere-else", signature=signature).ok
+
+truncated = records[:-1]  # an attacker deletes the last line
+result = verify_signed_chain(truncated, key=b"a-key-you-keep-somewhere-else", signature=signature)
+assert result.ok is False  # caught — the chain is consistent but its head moved
+```
+
+```bash
+logquill verify app.log --sign-key <hex key> --signature <hex signature>
+```
+
+### Content capture policy
+
+Prompt/completion text, tool call arguments/results, and a span's captured
+state (`meta.input_messages`, `output_messages`, `system_instructions`,
+`tool_arguments`, `tool_result`, `state_diff` — the `content`-classed fields
+in `logquill.privacy.FIELD_CLASSES`) are governed by a per-logger policy,
+**off by default** — applied before any plugin or transport ever sees the
+value, not something a plugin has to remember to attach:
+
+```python
+from logquill import Logger
+
+logger = Logger("app.agent")  # content_policy="off" by default
+
+record = logger.llm_call("chat", model="m", input_messages=["the user's actual prompt"])
+assert "the user's actual prompt" not in str(record["meta"]["input_messages"])
+```
+
+`"hash"` replaces the value with a stable digest (the same content always
+hashes the same, so two records can be confirmed to share one without either
+ever reaching a transport); `"truncate"` keeps the first 200 characters;
+`"full"` passes it through:
+
+```python
+from logquill import Logger
+
+Logger("app.agent", content_policy="full")  # see it all
+Logger("app.agent", content_policy="hash")  # correlate without exposing it
+```
+
+### `AuditLogger`: a preset for audit trails
+
+`AuditLogger` bundles `RedactPlugin`, `PIIRedactPlugin`, and
+`TamperEvidentPlugin`, with content capture off by default — the technical
+controls an audit trail commonly needs, in one call. (Scope-honesty note,
+same as the rest of the plugin pipeline: this doesn't make a deployment
+"compliant" with anything by itself.)
+
+```python
+from logquill import AuditLogger
+
+audit_log = AuditLogger("audit")  # pass transports=[FileTransport(...)] etc. as usual
+record = audit_log.info("user login", user_id=42, password="hunter2")
+assert record["meta"]["password"] == "***"
+# .child() shares the same hash chain, not a second interleaved one
+
+signature = audit_log.sign_head(b"a-key-you-keep-somewhere-else")
 ```
 
 ### Alerting on errors
