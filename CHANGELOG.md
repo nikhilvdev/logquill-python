@@ -4,6 +4,30 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Runtime intelligence:
+  - `FlightRecorderPlugin` generalizes `SamplingPlugin`'s tail-based
+    elevation from "a record sampling happened to drop" to "a record below
+    the level you actually want shipped" — buffers low-level records
+    (`DEBUG`/`TRACE`) per run and ships the whole buffered trail only if
+    that run later reaches an error level, so a run at `DEBUG` costs
+    nothing to ship unless it actually fails. Bounded the same way tail
+    elevation is (`max_buffered_records`/`max_runs`), and verified to stay
+    memory-bounded under a sustained multi-run burst.
+  - `RunSummaryPlugin` emits one record — total tokens, cost, tool calls,
+    retries, and errors — when a run's outermost span closes, so a
+    dashboard doesn't need to re-walk every record for a run's totals.
+  - `AdaptiveSamplingPlugin` always keeps errors and slow spans, samples
+    everything else, and caps ordinary traffic to a bytes-per-second
+    budget — adjusting its own rate up when there's room to spare and down
+    when it's saturated each window, based on demand rather than bytes
+    actually emitted (which stop growing once the budget saturates, and
+    would otherwise read a saturated gate as "plenty of room").
+  - `install_signal_level_handler`, `LevelFileWatcher`, and
+    `LevelEnvWatcher` change a `Logger`'s level without restarting the
+    process — a signal that re-reads an environment variable, a polled
+    file, or a polled environment variable (only useful when something
+    inside the same process is the one changing it — documented plainly,
+    since that's a real limit worth knowing about, not a gap to paper over).
 - Privacy, content policy, and an audit trail:
   - Every `Logger` now has a `content_policy` (`"off"` by default \| `"hash"`
     \| `"truncate"` \| `"full"`), governing the content fields an LLM call or
