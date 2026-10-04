@@ -9,16 +9,19 @@ from logquill.levels import Level, parse_level
 from logquill.logger import Logger
 from logquill.opt import OptLogger
 from logquill.parsing import TEXT_LOG_CASTS, TEXT_LOG_PATTERN, parse, parse_logfmt
+from logquill.plugins.adaptive_sampling_plugin import AdaptiveSamplingPlugin
 from logquill.plugins.alerting_plugin import AlertingPlugin
 from logquill.plugins.apprise_alert_plugin import AppriseAlertPlugin
 from logquill.plugins.context_plugin import ContextPlugin
 from logquill.plugins.email_alert_plugin import EmailAlertPlugin
+from logquill.plugins.flight_recorder_plugin import FlightRecorderPlugin
 from logquill.plugins.pagerduty_alert_plugin import PagerDutyAlertPlugin
 from logquill.plugins.pii_redact_plugin import PIIRedactPlugin
 from logquill.plugins.plugin import FunctionPlugin, Plugin
 from logquill.plugins.rate_limit_plugin import RateLimitPlugin
 from logquill.plugins.redact_plugin import RedactPlugin
 from logquill.plugins.run_plugin import RunPlugin
+from logquill.plugins.run_summary_plugin import RunSummaryPlugin
 from logquill.plugins.sampling_plugin import SamplingPlugin
 from logquill.plugins.slack_alert_plugin import SlackAlertPlugin
 from logquill.plugins.tamper_evident_plugin import (
@@ -32,6 +35,11 @@ from logquill.plugins.tamper_evident_plugin import (
 from logquill.plugins.trace_context_plugin import TraceContextPlugin
 from logquill.privacy import CONTENT_FIELDS, FIELD_CLASSES, ContentCapturePolicy, FieldClass
 from logquill.records import SCHEMA_VERSION, LLMBlock, LogRecord, parse_record
+from logquill.runtime_level import (
+    LevelEnvWatcher,
+    LevelFileWatcher,
+    install_signal_level_handler,
+)
 from logquill.serverless import with_azure_function, with_cloud_function, with_lambda
 from logquill.toggle import disable, enable, is_enabled
 from logquill.transports.batching_transport import BatchingTransport
@@ -65,6 +73,7 @@ from logquill.worker import AsyncWorker
 __version__ = "1.0.0"
 
 __all__ = [
+    "AdaptiveSamplingPlugin",
     "AlertingPlugin",
     "AppriseAlertPlugin",
     "AppInsightsTransport",
@@ -87,12 +96,15 @@ __all__ = [
     "FIELD_CLASSES",
     "FieldClass",
     "FileTransport",
+    "FlightRecorderPlugin",
     "Formatter",
     "FunctionPlugin",
     "HTTPTransport",
     "JSONFormatter",
     "KafkaTransport",
     "Level",
+    "LevelEnvWatcher",
+    "LevelFileWatcher",
     "LogfmtFormatter",
     "LLMBlock",
     "LogQuillAdapter",
@@ -115,6 +127,7 @@ __all__ = [
     "RedactPlugin",
     "RedisTransport",
     "RunPlugin",
+    "RunSummaryPlugin",
     "SCHEMA_VERSION",
     "SQLLogRow",
     "SQLiteTransport",
@@ -134,6 +147,7 @@ __all__ = [
     "disable",
     "enable",
     "format_exc_info",
+    "install_signal_level_handler",
     "is_enabled",
     "load_config",
     "logger_from_env",

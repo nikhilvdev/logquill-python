@@ -37,6 +37,7 @@ for what's landed so far.
 - **Parse any log file** — `parse()` pulls structured fields out of a log file (LogQuill's own or a legacy format) with a regex, streaming line by line — see [Parsing log files](#parsing-log-files)
 - **CLI** — `logquill tail app.log --level=warn --json -f` for filtering/following a JSONL log file in local dev, no extra install — see [CLI](#cli)
 - **Local-first trace viewer** — `logquill trace <run_id> --file logs.jsonl` prints an annotated span tree (streamed, bounded memory at gigabyte scale); `logquill serve` runs a small offline web UI (stdlib only — run list, span tree/waterfall, search, level filter) reading JSONL or a `SQLiteTransport` database; `logquill dev` live-renders the current run as it happens — no account, nothing leaves your machine
+- **Runtime intelligence** — `FlightRecorderPlugin` ships a run's buffered DEBUG trail only if it errors; `RunSummaryPlugin` emits one record with a run's total tokens/cost/tool calls/retries/errors; `AdaptiveSamplingPlugin` always keeps errors and slow spans while capping ordinary traffic to a bytes-per-second budget; `install_signal_level_handler`/`LevelFileWatcher`/`LevelEnvWatcher` change a logger's level without a restart — see [Runtime level control](#runtime-level-control)
 
 ## Install
 
@@ -517,6 +518,84 @@ assert [r["message"] for r in sink.records] == [
 Buffering is bounded by `max_buffered_records` and `max_traces` — the oldest
 buffered trace is evicted once either limit is hit, so a single
 high-cardinality or long-lived trace can't grow memory without limit.
+
+### The flight recorder: DEBUG context, only for runs that fail
+
+`FlightRecorderPlugin` generalizes the same idea from "a record sampling
+happened to drop" to "a record below the level you actually want shipped,
+period": run a logger at `DEBUG` so fine-grained context always exists, but
+only pay to ship it for the runs that turn out to matter.
+
+```python
+from logquill import CollectingTransport, FlightRecorderPlugin, Logger
+
+sink = CollectingTransport()
+recorder = FlightRecorderPlugin(transports=[sink])  # ship_at=INFO, flush_at=ERROR
+logger = Logger("app.agent", level="DEBUG", transports=[sink], plugins=[recorder])
+
+# a run that finishes cleanly never ships its DEBUG trail
+logger.debug("fetched 40 candidates", run_id="run-1")  # buffered, not shipped
+logger.debug("filtered to top 3", run_id="run-1")  # buffered, not shipped
+logger.info("run finished", run_id="run-1")  # ships on its own
+assert [r["message"] for r in sink.records] == ["run finished"]
+
+# a run that errors ships its full DEBUG trail, flushed by the error itself
+logger.debug("fetched 40 candidates", run_id="run-2")  # buffered for now
+logger.error("ranking model timed out", run_id="run-2")  # flushes the buffer
+assert [r["message"] for r in sink.records[-2:]] == [
+    "fetched 40 candidates",
+    "ranking model timed out",
+]
+```
+
+Bounded the same way tail-based elevation is: `max_buffered_records` and
+`max_runs` cap the buffer, the oldest run evicted (and lost, not shipped)
+once either is hit.
+
+### One record per run: `RunSummaryPlugin`
+
+Emits a single summary record — total tokens, cost, tool calls, retries,
+and errors — when a run's outermost span closes, so a dashboard doesn't
+need to re-walk every record to answer "how much did this run cost":
+
+```python
+from logquill import CollectingTransport, Logger, RunPlugin, RunSummaryPlugin
+
+sink = CollectingTransport()
+summary = RunSummaryPlugin(transports=[sink])
+logger = Logger("app.agent", transports=[sink], plugins=[RunPlugin(), summary])
+
+with logger.span("run", operation="invoke_agent", agent_name="planner"):
+    logger.llm_call("chat", model="m", tokens_in=1200, tokens_out=340, cost_usd=0.02)
+    logger.action("search", tool="search")
+
+run_summary = sink.records[-1]
+assert run_summary["message"] == "run summary"
+assert run_summary["meta"]["tokens_in"] == 1200
+assert run_summary["meta"]["tool_calls"] == 1
+assert run_summary["meta"]["errors"] == 0
+```
+
+### Adaptive sampling with a byte-rate budget
+
+`AdaptiveSamplingPlugin` always keeps errors and slow spans, samples
+everything else, and caps how many bytes of that ordinary traffic pass
+through per second — adjusting its own rate up when there's room to spare
+and down when it's saturated, instead of one fixed rate tuned by hand:
+
+```python
+from logquill import AdaptiveSamplingPlugin, Logger
+
+logger = Logger(
+    "app",
+    plugins=[AdaptiveSamplingPlugin(base_rate=0.1, slow_ms=1000, max_bytes_per_second=100_000)],
+)
+
+logger.error("always kept")                        # errors bypass sampling entirely
+with logger.span("slow_call", duration_ms=1500):    # slow spans bypass it too
+    pass
+logger.info("ordinary traffic")                     # sampled at the current rate
+```
 
 ### PII redaction by pattern, not just key
 
@@ -1482,6 +1561,37 @@ assert errors == [
 To read back what `TextFormatter` wrote, use the ready-made
 `TEXT_LOG_PATTERN` with `cast=TEXT_LOG_CASTS` (which decodes `meta` from JSON);
 for `LogfmtFormatter` output, `parse_logfmt(line)` returns a dict of strings.
+
+## Runtime level control
+
+Change a `Logger`'s level without restarting the process — three
+independent mechanisms; pick whichever fits your deployment:
+
+```python
+import os, signal
+from logquill import Logger, install_signal_level_handler
+
+logger = Logger("app")
+install_signal_level_handler(logger, env_var="APP_LOG_LEVEL")
+# kill -USR1 <pid> now re-reads APP_LOG_LEVEL and applies it
+```
+
+```python
+from logquill import Logger, LevelFileWatcher
+
+logger = Logger("app")
+watcher = LevelFileWatcher(logger, "/var/run/app.level", poll_interval=2.0)
+watcher.start()  # `echo DEBUG > /var/run/app.level` to turn on DEBUG, no restart
+# watcher.stop() on shutdown
+```
+
+`LevelEnvWatcher(logger, "APP_LOG_LEVEL")` polls an environment variable the
+same way — but only helps when something *inside* this same process is the
+one changing it (a config-reload callback, `python-dotenv`'s
+`override=True`); an OS-level environment change made from outside the
+process, the way a shell normally would, is never visible to code already
+running inside it. Use the signal or file mechanism for anything triggered
+externally.
 
 ## CLI
 
